@@ -33,7 +33,7 @@ class Experiment:
         self.rng = np.random.default_rng(cfg.random_seed)
         self.source = source or create_source(cfg, rng=self.rng)
         self.decoder = decoder or create_decoder(cfg, rng=self.rng)
-        # current_item 窗口大小 = 解码窗口长度；EXECUTE 流式推入 acquire_samples 个样本
+        # current_item 窗口大小 = 解码窗口长度；EXECUTE 期间按时长流式推入样本
         self.buffer = BlockBuffer(cfg.n_channels, cfg.window_samples)
 
         self.ui: ExperimentUI | None = None

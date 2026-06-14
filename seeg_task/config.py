@@ -41,11 +41,9 @@ class ExperimentConfig:
     # ---- 各阶段时长（秒）----------------------------------------------------
     cue_duration: float = 2.0        # CUE：全屏「当前动作为：{}」提示时长
     fixation_duration: float = 1.0   # FIXATION：盯点（白色十字）时长
+    execute_duration: float = 4.0    # EXECUTE：执行/采集阶段持续时长（秒），到点进 FINISH
     iti_duration: float = 0.0        # trial 间隔（仅 trial 之间，最后一个 trial 后不做）；0=无间隔
-    predict_interval: float = 0.5    # EXECUTE 采集期内每隔多少秒做一次 predict
-
-    # ---- 采集 --------------------------------------------------------------
-    acquire_samples: int = 0         # EXECUTE 采集多少样本后结束；<=0 表示取 window_samples
+    predict_interval: float = 0.5    # EXECUTE 内每隔多少秒做一次 predict
 
     # ---- 信号参数 -----------------------------------------------------------
     n_channels: int = 64             # SEEG 通道数
@@ -92,16 +90,13 @@ class ExperimentConfig:
     def action_labels(self) -> list[str]:
         return [a.label for a in self.actions]
 
-    @property
-    def effective_acquire_samples(self) -> int:
-        """EXECUTE 实际采集样本数：``acquire_samples`` 为正则用之，否则取 ``window_samples``。"""
-        return self.acquire_samples if self.acquire_samples > 0 else self.window_samples
-
     def validate(self) -> None:
         if self.n_classes < 2:
             raise ValueError("至少需要 2 个动作类别")
         if self.window_samples <= 0 or self.n_channels <= 0:
             raise ValueError("n_channels 与 window_samples 必须为正")
+        if self.execute_duration <= 0:
+            raise ValueError("execute_duration 必须为正")
         if self.predict_interval <= 0:
             raise ValueError("predict_interval 必须为正")
         if self.iti_duration < 0:

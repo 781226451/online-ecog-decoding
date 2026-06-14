@@ -41,17 +41,17 @@ EXECUTE 期实时解码；`ExperimentUI` 负责显示。
 | 转移 | 触发 | 动作 |
 |------|------|------|
 | `CUE → FIXATION` | `cue_duration` 到 | — |
-| `FIXATION → EXECUTE` | `fixation_duration` 到 | **entry EXECUTE**：`buffer.reset_current_item()`（清单次缓存）+ `counter = 0` |
-| `EXECUTE → FINISH` | `counter >= acquire_samples`（采集满） | — |
+| `FIXATION → EXECUTE` | `fixation_duration` 到 | **entry EXECUTE**：`buffer.reset_current_item()`（清单次缓存）+ 起执行/推理计时 |
+| `EXECUTE → FINISH` | `execute_duration` 到（计时） | — |
 | `FINISH → [*]` | 收尾完成（可选 ITI 到时） | **entry FINISH**：`buffer.update_buffer(label)` |
 
 ```mermaid
 stateDiagram-v2
     [*] --> CUE
     CUE --> FIXATION: cue_duration 到
-    FIXATION --> EXECUTE: fixation_duration 到<br/>entry: reset_current_item, counter=0
-    EXECUTE --> EXECUTE: 每样本<br/>update_current_item, counter++, 定时 predict
-    EXECUTE --> FINISH: counter≥acquire_samples
+    FIXATION --> EXECUTE: fixation_duration 到<br/>entry: reset_current_item, 起计时
+    EXECUTE --> EXECUTE: 每帧 read 喂窗口<br/>每 predict_interval 推理一次
+    EXECUTE --> FINISH: execute_duration 到
     FINISH --> [*]: 收尾完成<br/>entry: update_buffer(label)
 ```
 
@@ -106,13 +106,15 @@ stateDiagram-v2
 
 ## 6. 关键设计决策（默认值，均可配置）
 1. **训练范围 = 按 block**：每个 block 起始 `buffer.clean()` 清空所有数据，`TRAIN_REST` 只用**本 block** 样本训练。
-2. **EXECUTE 结束触发 = 采样点计数**：`counter` 计采集到的**样本数**，达到 `acquire_samples` 即结束执行；
-   `acquire_samples` 默认取窗口长度 `window_samples`（N）。CUE/FIXATION 仍按时长 `cue_duration`/`fixation_duration`。
-3. 实时解码仅在 EXECUTE 期按 `predict_interval` 进行；正确率实时刷新。
+2. **EXECUTE 结束触发 = 时间**：进入 EXECUTE 起计时，到 `execute_duration` 秒即进 FINISH；
+   期间每帧 `source.read()` 喂入滑动窗口，每 `predict_interval` 对整个 `current_item` 推理一次。
+   CUE/FIXATION 同样按时长 `cue_duration`/`fixation_duration`。
+3. 实时解码仅在 EXECUTE 期按 `predict_interval` 进行；正确率实时刷新（早期窗口含前导 0，可接受）。
 
-## 7. 新增配置项（`paradigm_config.toml` / `ExperimentConfig`）
-- `acquire_samples: int = window_samples` —— EXECUTE 阶段采集多少样本后结束。
-- 复用：`cue_duration`、`fixation_duration`、`predict_interval`、`trials_per_block`、`n_blocks` 等。
+## 7. 配置项（`paradigm_config.toml` / `ExperimentConfig`）
+- `execute_duration: float` —— EXECUTE 执行/采集时长（秒），到点进 FINISH。
+- `window_samples` —— 解码窗口宽度（`current_item` 列数 / 喂给 predict 的样本数）。
+- 复用：`cue_duration`、`fixation_duration`、`iti_duration`、`predict_interval`、`trials_per_block`、`n_blocks` 等。
 - 每个 block 起始 `BlockBuffer.clean()` 清空所有数据（仅用本 block 样本训练）。
 
 ## 8. 代码落地

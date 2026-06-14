@@ -54,7 +54,6 @@ class TrialFSM:
         self.decoder = decoder
         self.buffer = buffer
         self.ui = ui
-        self.acquire_samples = config.effective_acquire_samples
 
     def run(self, action_index: int) -> None:
         self._cue(action_index)
@@ -71,23 +70,19 @@ class TrialFSM:
     def _fixation(self) -> None:
         _run_for(self.ui, self.config.fixation_duration, self.ui.draw_fixation_cross)
 
-    # --- EXECUTE：流式采集 + 实时解码 -------------------------------------
+    # --- EXECUTE：按时长计时，定时推理；到点进 FINISH --------------------
     def _execute(self, action_index: int) -> None:
         cfg, ui = self.config, self.ui
         self.source.flush()               # 丢弃 CUE/FIXATION 期积压，只采执行期数据
         self.buffer.reset_current_item()  # 进入 EXECUTE：清单次缓存
-        counter = 0
-        tick = core.Clock()
+        exec_clock = core.Clock()         # 执行期计时：到 execute_duration 即结束
+        tick = core.Clock()               # 推理计时：每 predict_interval 推理一次
         first = True
-        while counter < self.acquire_samples:
-            chunk = self.source.read()  # 一次性取走全部可用数据（与类别无关）
+        while exec_clock.getTime() < cfg.execute_duration:
+            chunk = self.source.read()  # 取走全部可用数据，喂入滑动窗口
             if chunk is not None:
-                need = self.acquire_samples - counter
-                if chunk.shape[1] > need:        # 不超采，多余丢弃
-                    chunk = chunk[:, :need]
                 self.buffer.update_current_items(chunk)
-                counter += chunk.shape[1]
-            # 定时实时解码 + 刷新正确率（至少一次）
+            # 定时推理：对整个 current_item 解码并刷新正确率（首帧也来一次）
             if first or tick.getTime() >= cfg.predict_interval:
                 first = False
                 tick.reset()
@@ -97,6 +92,7 @@ class TrialFSM:
             ui.flip()
             if ui.quit_requested():
                 raise QuitExperiment
+        # 退出循环即进入 FINISH（执行期计时器随之失效）
 
     # --- FINISH：存档（trial 收尾）---------------------------------------
     def _finish(self, action_index: int) -> None:
