@@ -15,15 +15,8 @@ from pathlib import Path
 
 @dataclass
 class ActionDef:
-    """一个动作类别的定义。
+    """一个动作类别：仅含屏幕展示的（中文）名称。"""
 
-    Attributes:
-        key:   程序内部使用的英文标识，同时用于在 ``media_dir`` 下按
-               ``<key>.gif`` / ``<key>.mp4`` 约定查找素材。
-        label: 屏幕上向患者展示的（中文）动作名称。
-    """
-
-    key: str
     label: str
 
 
@@ -34,10 +27,10 @@ class ExperimentConfig:
     # ---- 动作类别（解码类别数 = len(actions)）-------------------------------
     actions: list[ActionDef] = field(
         default_factory=lambda: [
-            ActionDef("left_hand", "左手握拳"),
-            ActionDef("right_hand", "右手握拳"),
-            ActionDef("feet", "双脚背屈"),
-            ActionDef("tongue", "伸舌"),
+            ActionDef("左手握拳"),
+            ActionDef("右手握拳"),
+            ActionDef("双脚背屈"),
+            ActionDef("伸舌"),
         ]
     )
 
@@ -88,11 +81,6 @@ class ExperimentConfig:
         default_factory=lambda: ["PingFang SC", "Heiti SC", "STHeiti", "Arial Unicode MS", "SimHei"]
     )
 
-    # ---- 媒体素材 -----------------------------------------------------------
-    show_media: bool = True           # 是否显示动作 gif/视频；False 则左侧仅用文字表述
-    media_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent / "media")
-    gif_frame_duration: float = 0.05  # gif 缺少帧时长信息时的回退帧间隔（秒）
-
     # ---- 日志 ---------------------------------------------------------------
     log_level: str = "INFO"           # 日志级别：DEBUG/INFO/WARNING/ERROR
     log_file: str | None = None       # 日志文件路径（相对则相对配置文件目录）；为空仅输出到控制台
@@ -136,8 +124,8 @@ class ExperimentConfig:
     def from_dict(cls, data: dict, base_dir: Path | None = None) -> "ExperimentConfig":
         """由（TOML/JSON 解析得到的）字典构造配置；未提供的字段沿用默认值。
 
-        会做必要的类型转换：``actions`` 列表 -> :class:`ActionDef`；颜色/窗口尺寸
-        列表 -> 元组；``media_dir`` 相对路径相对 ``base_dir`` 解析；``random_seed``
+        会做必要的类型转换：``actions`` 列表（字符串或 ``{label}`` 表）-> :class:`ActionDef`；
+        颜色/窗口尺寸列表 -> 元组；``log_file`` 相对路径相对 ``base_dir`` 解析；``random_seed``
         为负数视作 ``None``（不固定种子）。未知字段会被忽略并告警。
         """
         known = {f.name for f in dataclasses.fields(cls)}
@@ -149,17 +137,16 @@ class ExperimentConfig:
             kwargs[key] = value
 
         if "actions" in kwargs:
-            kwargs["actions"] = [
-                a if isinstance(a, ActionDef) else ActionDef(**a) for a in kwargs["actions"]
-            ]
+            def _to_action(a):
+                if isinstance(a, ActionDef):
+                    return a
+                if isinstance(a, str):
+                    return ActionDef(a)
+                return ActionDef(**a)
+            kwargs["actions"] = [_to_action(a) for a in kwargs["actions"]]
         for tup_field in ("window_size", "background_color", "text_color"):
             if tup_field in kwargs and isinstance(kwargs[tup_field], list):
                 kwargs[tup_field] = tuple(kwargs[tup_field])
-        if "media_dir" in kwargs:
-            md = Path(kwargs["media_dir"])
-            if not md.is_absolute() and base_dir is not None:
-                md = (base_dir / md).resolve()
-            kwargs["media_dir"] = md
         if kwargs.get("log_file"):
             lf = Path(kwargs["log_file"])
             if not lf.is_absolute() and base_dir is not None:
@@ -174,7 +161,7 @@ class ExperimentConfig:
 
 
 def load_config(path: str | Path) -> ExperimentConfig:
-    """从 TOML 文件加载 :class:`ExperimentConfig`。相对路径（如 media_dir）相对该文件所在目录解析。"""
+    """从 TOML 文件加载 :class:`ExperimentConfig`。相对路径（如 log_file）相对该文件所在目录解析。"""
     path = Path(path)
     with open(path, "rb") as f:
         data = tomllib.load(f)

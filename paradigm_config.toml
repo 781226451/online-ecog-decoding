@@ -56,11 +56,6 @@ text_color = [1.0, 1.0, 1.0]
 # 中文字体：按顺序尝试，取第一个系统可用的
 font_candidates = ["PingFang SC", "Heiti SC", "STHeiti", "Arial Unicode MS", "SimHei"]
 
-# ---- 媒体素材 --------------------------------------------------------------
-show_media = false           # 暂时屏蔽 gif/视频，左侧仅用文字表述动作（改 true 恢复）
-media_dir = "media"          # 相对路径相对本配置文件所在目录解析
-gif_frame_duration = 0.05    # gif 缺少帧时长信息时的回退帧间隔（秒）
-
 # ---- 日志 ------------------------------------------------------------------
 log_level = "INFO"           # DEBUG/INFO/WARNING/ERROR；predict 与 update 在 INFO 级别写日志
 # log_file = "logs/run.log"  # 取消注释则同时写入文件（相对路径相对本配置文件目录）
@@ -69,13 +64,8 @@ log_level = "INFO"           # DEBUG/INFO/WARNING/ERROR；predict 与 update 在
 random_seed = 0              # 可复现种子；填负数（如 -1）表示不固定种子
 
 # ---- 动作类别（解码类别数 = 动作数）---------------------------------------
-# key 用于在 media_dir 下按 <key>.gif/.mp4 查找素材；label 为屏幕显示的中文名。
-actions = [
-    { key = "left_hand",  label = "左手握拳" },
-    { key = "right_hand", label = "右手握拳" },
-    { key = "feet",       label = "双脚背屈" },
-    { key = "tongue",     label = "伸舌" },
-]
+# 每个元素为屏幕显示的动作名（中文）。
+actions = ["左手握拳", "右手握拳", "双脚背屈", "伸舌"]
 
 # ---- 解码器额外参数（可选，透传给 decoder_class.from_config）---------------
 # 必须置于文件末尾（TOML 表头之后的键都归属该表）。默认空表。

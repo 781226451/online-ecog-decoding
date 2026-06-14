@@ -12,7 +12,7 @@
 | 采集层 | `signal_source.*` + `create_source()` | 统一接口 `SignalSource`，三实现：`LSLSource`（外部实时）/`DummySource`（纯随机）/`SyntheticSource`（可分模拟） |
 | 解码层 | `decoder.BaseDecoder`（接口）/ `Decoder` / `LinearModel` / `create_decoder` | 解码器接口定义两函数：`predict`（推理）、`update`（模型更新）；`Decoder` 为参考实现，可由 `config.decoder_class` 动态指定子类 |
 | 在线更新层 | `model_update.HistoryBuffer` / `ModelTrainer` | 历史样本缓冲；`Decoder.update` 内部用 `ModelTrainer` 重新拟合并热替换模型 |
-| 界面层 | `ui.ExperimentUI` / `MediaPlayer` | PsychoPy 可视化：左=动作提示+gif/视频，右=当前动作正确率，休息页 |
+| 界面层 | `ui.ExperimentUI` | PsychoPy 可视化：左=动作名（纯文字），右=当前动作正确率，盯点/休息页 |
 
 **核心契约**（替换真实算法时保持不变）：
 - 推理：`BaseDecoder.predict(ndarray[通道,采样点]) -> ndarray[n_classes]`（概率分布，和为 1）
@@ -50,12 +50,10 @@ flowchart TB
     TRAIN["ModelTrainer.train"]
   end
   subgraph UIL["界面层 (PsychoPy)"]
-    UI["ExperimentUI<br/>左:动作 右:正确率 / 休息页"]
-    MP["MediaPlayer<br/>gif / 视频 / 图"]
+    UI["ExperimentUI<br/>左:动作名 右:正确率 / 盯点 / 休息页"]
   end
   subgraph EXT["外部资源"]
     STREAM(["LSL 网络流"])
-    MEDIA[("media/ 素材")]
   end
 
   RUN --> CONF
@@ -71,7 +69,7 @@ flowchart TB
   EXP -. update(样本快照) .-> DECODER
   DECODER --> TRAIN
   TRAIN -. 新模型(热替换) .-> MODEL
-  EXP --> UI --> MP --> MEDIA
+  EXP --> UI
 ```
 
 ## 3. 运行时数据流（trial 与休息）

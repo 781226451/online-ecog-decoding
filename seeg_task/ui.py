@@ -5,25 +5,16 @@
     +---------------------------+---------------------------+
     |        左面板             |        右面板             |
     |   动作名称（中文）        |   实时解码正确率          |
-    |   动作 gif / 视频         |   大号百分比 + 试次计数   |
-    |                           |   各类别概率条            |
     +---------------------------+---------------------------+
 
 ``ExperimentUI`` 只提供「绘制单帧」级别的方法（draw_* 不调用 flip），由
-:mod:`seeg_task.experiment` 控制各阶段的时间循环与 :meth:`flip`，从而把时序逻辑
-集中在实验编排里。
+:mod:`seeg_task.fsm` 控制各阶段的时间循环与 :meth:`flip`，从而把时序逻辑集中在编排里。
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 from psychopy import core, event, visual
-
-# 支持的媒体扩展名
-_VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
-_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".bmp"}
 
 
 def _resolve_font(candidates: list[str]) -> str:
@@ -38,127 +29,6 @@ def _resolve_font(candidates: list[str]) -> str:
     except Exception:  # noqa: BLE001 - 字体探测失败不应阻塞实验
         pass
     return candidates[0] if candidates else "Arial"
-
-
-class MediaPlayer:
-    """加载并逐帧绘制 gif / 视频 / 静态图。
-
-    - 视频 (.mp4/.mov/...) 使用 :class:`psychopy.visual.MovieStim`，循环播放。
-    - gif 使用 imageio 预解码为帧序列，按帧时长用内部时钟循环。
-    - 静态图使用 :class:`psychopy.visual.ImageStim`。
-    """
-
-    def __init__(
-        self,
-        win: visual.Window,
-        path: Path,
-        size: tuple[float, float],
-        pos: tuple[float, float],
-        gif_fallback_dt: float,
-    ) -> None:
-        self.win = win
-        self.path = path
-        self.size = size
-        self.pos = pos
-        self.kind = "none"
-        self._stim = None
-        self._frames: list = []
-        self._frame_dt = gif_fallback_dt
-        self._clock = core.Clock()
-
-        ext = path.suffix.lower()
-        try:
-            if ext in _VIDEO_EXTS:
-                self._init_video()
-            elif ext == ".gif":
-                self._init_gif(gif_fallback_dt)
-            elif ext in _IMAGE_EXTS:
-                self._init_image()
-        except Exception as exc:  # noqa: BLE001 - 素材损坏时退化为无媒体
-            print(f"[MediaPlayer] 加载素材失败 {path}: {exc}")
-            self.kind = "none"
-            self._stim = None
-
-    # --- 初始化各类型 -------------------------------------------------------
-    def _init_video(self) -> None:
-        self._stim = visual.MovieStim(
-            self.win, str(self.path), size=self.size, pos=self.pos,
-            units="height", loop=True, noAudio=True,
-        )
-        self.kind = "video"
-
-    def _init_gif(self, fallback_dt: float) -> None:
-        import imageio.v2 as imageio
-
-        reader = imageio.get_reader(str(self.path))
-        meta = reader.get_meta_data()
-        duration = meta.get("duration")  # 毫秒，可能为标量或列表
-        if isinstance(duration, (list, tuple)) and duration:
-            self._frame_dt = float(np.mean(duration)) / 1000.0
-        elif isinstance(duration, (int, float)) and duration:
-            self._frame_dt = float(duration) / 1000.0
-        else:
-            self._frame_dt = fallback_dt
-
-        frames = [np.asarray(f) for f in reader]
-        reader.close()
-        # 预创建每帧 ImageStim（gif 一般较短，可接受）。
-        for frame in frames:
-            tex = self._to_texture(frame)
-            self._frames.append(
-                visual.ImageStim(self.win, image=tex, size=self.size, pos=self.pos, units="height")
-            )
-        if self._frames:
-            self.kind = "gif"
-
-    def _init_image(self) -> None:
-        self._stim = visual.ImageStim(
-            self.win, image=str(self.path), size=self.size, pos=self.pos, units="height"
-        )
-        self.kind = "image"
-
-    @staticmethod
-    def _to_texture(frame: np.ndarray) -> np.ndarray:
-        """uint8 RGB(A) 帧 -> PsychoPy 纹理（float, [-1,1], 取 RGB）。"""
-        arr = frame.astype(np.float64)
-        if arr.ndim == 2:  # 灰度 -> RGB
-            arr = np.repeat(arr[:, :, None], 3, axis=2)
-        arr = arr[:, :, :3]
-        return arr / 127.5 - 1.0
-
-    # --- 播放控制 -----------------------------------------------------------
-    def reset(self) -> None:
-        """重置到起始帧并开始计时（每个 trial 开始时调用）。"""
-        self._clock.reset()
-        if self.kind == "video" and self._stim is not None:
-            try:
-                self._stim.seek(0)
-                self._stim.play()
-            except Exception:  # noqa: BLE001
-                pass
-
-    def draw(self) -> None:
-        if self.kind == "video" and self._stim is not None:
-            self._stim.draw()
-        elif self.kind == "gif" and self._frames:
-            idx = int(self._clock.getTime() / self._frame_dt) % len(self._frames)
-            self._frames[idx].draw()
-        elif self.kind == "image" and self._stim is not None:
-            self._stim.draw()
-
-    def stop(self) -> None:
-        if self.kind == "video" and self._stim is not None:
-            try:
-                self._stim.pause()
-            except Exception:  # noqa: BLE001
-                pass
-
-    def unload(self) -> None:
-        if self.kind == "video" and self._stim is not None:
-            try:
-                self._stim.stop()
-            except Exception:  # noqa: BLE001
-                pass
 
 
 class ExperimentUI:
@@ -195,7 +65,6 @@ class ExperimentUI:
         self.action_total = np.zeros(config.n_classes, dtype=int)
 
         self._build_static_stims()
-        self._build_media_players()
 
     # --- 构建 ---------------------------------------------------------------
     def _text(self, **kwargs) -> visual.TextStim:
@@ -213,19 +82,9 @@ class ExperimentUI:
         # 注视点
         self.fixation = self._text(text="+", height=0.12, pos=(self._left_x, 0))
 
-        # 左面板：动作名称
+        # 左面板：动作名称（在左半区居中）
         self.action_title = self._text(
-            text="", height=0.07, pos=(self._left_x, 0.40), bold=True,
-        )
-        # 左面板：无素材时的占位框 + 文字
-        self.media_placeholder = visual.Rect(
-            self.win, width=min(0.55, self._half_w * 0.8), height=0.4,
-            pos=(self._left_x, -0.02), units="height",
-            lineColor=(0.35, 0.35, 0.35), fillColor=None,
-        )
-        self.placeholder_text = self._text(
-            text="(无动作素材)", height=0.04, pos=(self._left_x, -0.02),
-            color=(0.4, 0.4, 0.4),
+            text="", height=0.09, pos=(self._left_x, 0.0), bold=True,
         )
 
         # 右面板：当前动作的实时分类正确率（标题 + 大号百分比）
@@ -243,32 +102,6 @@ class ExperimentUI:
         self.center_text = self._text(text="", height=0.05, pos=(0, 0), wrapWidth=self._half_w * 1.6)
         self.rest_title = self._text(text="", height=0.07, pos=(0, 0.10), bold=True)
         self.rest_count = self._text(text="", height=0.06, pos=(0, -0.12))
-
-    def _build_media_players(self) -> None:
-        cfg = self.config
-        self.players: dict[int, MediaPlayer | None] = {}
-        if not cfg.show_media:  # 屏蔽 gif/视频：不加载任何素材
-            for i in range(len(cfg.actions)):
-                self.players[i] = None
-            return
-        media_size = (min(0.6, self._half_w * 0.85), 0.42)
-        media_pos = (self._left_x, -0.02)
-        for i, action in enumerate(cfg.actions):
-            path = self._find_media(action.key)
-            if path is None:
-                self.players[i] = None
-            else:
-                self.players[i] = MediaPlayer(self.win, path, media_size, media_pos, cfg.gif_frame_duration)
-
-    def _find_media(self, key: str) -> Path | None:
-        media_dir: Path = self.config.media_dir
-        if not media_dir.exists():
-            return None
-        for ext in [".gif", *_VIDEO_EXTS, *_IMAGE_EXTS]:
-            candidate = media_dir / f"{key}{ext}"
-            if candidate.exists():
-                return candidate
-        return None
 
     # --- 统计更新 -----------------------------------------------------------
     def record_result(self, predicted: int, true_label: int, probs: np.ndarray | None = None) -> bool:
@@ -294,23 +127,12 @@ class ExperimentUI:
     def draw_divider(self) -> None:
         self.divider.draw()
 
-    def draw_left_media(self, action_index: int) -> None:
-        if not self.config.show_media:  # 纯文字模式：不画媒体/占位框，仅保留动作名文字
-            return
-        player = self.players.get(action_index)
-        if player is not None and player.kind != "none":
-            player.draw()
-        else:
-            self.media_placeholder.draw()
-            self.placeholder_text.draw()
-
     def draw_cue(self, action_index: int) -> None:
-        """绘制左侧动作提示（名称 + 媒体）+ 右侧面板 + 分隔线（单帧）。"""
+        """EXECUTE 阶段单帧：左侧动作名 + 右侧实时正确率 + 分隔线。"""
         self.current_action = action_index
         self.action_title.text = self.config.actions[action_index].label
         self.draw_divider()
         self.action_title.draw()
-        self.draw_left_media(action_index)
         self.draw_right_panel()
 
     def draw_fixation(self, action_index: int | None = None) -> None:
@@ -346,16 +168,6 @@ class ExperimentUI:
     def flip(self) -> float:
         return self.win.flip()
 
-    def start_trial_media(self, action_index: int) -> None:
-        player = self.players.get(action_index)
-        if player is not None:
-            player.reset()
-
-    def stop_trial_media(self, action_index: int) -> None:
-        player = self.players.get(action_index)
-        if player is not None:
-            player.stop()
-
     def _pump(self) -> None:
         """主动派发窗口事件队列（pyglet），确保按键被捕获。"""
         try:
@@ -377,9 +189,6 @@ class ExperimentUI:
             core.wait(0.005)
 
     def close(self) -> None:
-        for player in getattr(self, "players", {}).values():
-            if player is not None:
-                player.unload()
         try:
             self.win.close()
         except Exception:  # noqa: BLE001
