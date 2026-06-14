@@ -254,12 +254,15 @@ class DummyDecoder(BaseDecoder):
         return False
 
 
-def create_decoder(config, rng: np.random.Generator | None = None) -> BaseDecoder:
+def create_decoder(config, rng: np.random.Generator | None = None):
     """按 ``config.decoder_class`` 动态导入并构造解码器实例。
 
     ``config.decoder_class`` 为完整导入路径（如 ``"seeg_task.decoder.Decoder"`` 或
-    ``"mypkg.mymod.MyDecoder"``），对应类须为 :class:`BaseDecoder` 的子类并实现
-    :meth:`BaseDecoder.from_config`。``config.decoder_params`` 作为关键字参数透传给它。
+    ``"models.model_1.model.LogisticBandPowerDecoder"``）。**鸭子类型**接入——只要求实例
+    具备可调用的 ``predict`` 与 ``update``，无需继承 :class:`BaseDecoder`：
+
+    - 若类定义了 ``from_config``，用 ``cls.from_config(config, rng=rng, **decoder_params)`` 构造；
+    - 否则用 ``cls(config.n_classes, **decoder_params)`` 构造（外部自带模型常见此签名）。
     """
     target = config.decoder_class
     module_path, _, class_name = target.rpartition(".")
@@ -272,9 +275,16 @@ def create_decoder(config, rng: np.random.Generator | None = None) -> BaseDecode
         cls = getattr(module, class_name)
     except (ImportError, AttributeError) as exc:
         raise ImportError(f"无法导入解码器类 {target!r}: {exc}") from exc
-
-    if not (isinstance(cls, type) and issubclass(cls, BaseDecoder)):
-        raise TypeError(f"{target} 不是 BaseDecoder 的子类")
+    if not isinstance(cls, type):
+        raise TypeError(f"{target} 不是一个类")
 
     params = dict(getattr(config, "decoder_params", {}) or {})
-    return cls.from_config(config, rng=rng, **params)
+    if hasattr(cls, "from_config"):
+        decoder = cls.from_config(config, rng=rng, **params)
+    else:
+        decoder = cls(config.n_classes, **params)
+
+    for method in ("predict", "update"):
+        if not callable(getattr(decoder, method, None)):
+            raise TypeError(f"{target} 缺少必需的可调用方法 {method}()")
+    return decoder

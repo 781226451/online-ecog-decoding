@@ -18,3 +18,6 @@ venv/
 # PsychoPy 运行产物
 *.log
 lastRun.log
+
+# 模型权重运行时产物
+models/**/*.pkl
