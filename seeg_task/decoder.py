@@ -191,10 +191,7 @@ class Decoder(BaseDecoder):
         features = extract_features(x)
         with self._lock:
             logits = self._model.infer(features)
-        probs = softmax(np.asarray(logits, dtype=np.float64))
-        pred = int(np.argmax(probs))
-        logger.info("predict | x={} -> class={} p={:.3f}", tuple(x.shape), pred, float(probs[pred]))
-        return probs
+        return softmax(np.asarray(logits, dtype=np.float64))
 
     def update(self, samples: "list[tuple[np.ndarray, int]]") -> bool:
         """模型更新：用历史样本重新拟合并热替换内部模型，线程安全。"""
@@ -243,10 +240,7 @@ class DummyDecoder(BaseDecoder):
 
     def predict_inner(self, x: np.ndarray) -> np.ndarray:
         """推理：忽略输入，返回一个随机概率分布（合法性由基类 predict 校验）。"""
-        probs = softmax(self._rng.standard_normal(self.n_classes))
-        pred = int(np.argmax(probs))
-        logger.info("predict(dummy) | x={} -> class={} p={:.3f}", tuple(x.shape), pred, float(probs[pred]))
-        return probs
+        return softmax(self._rng.standard_normal(self.n_classes))
 
     def update(self, samples: "list[tuple[np.ndarray, int]]") -> bool:
         """模型更新：占位解码器无模型，直接跳过。"""

@@ -87,7 +87,11 @@ class TrialFSM:
                 first = False
                 tick.reset()
                 probs = self.decoder.predict(self.buffer.current_item)
-                ui.record_result(int(np.argmax(probs)), action_index, probs)
+                pred = int(np.argmax(probs))
+                logger.info("predict | x={} -> {}({}) p={:.3f}",
+                            tuple(self.buffer.current_item.shape), pred,
+                            cfg.actions[pred].label, float(probs[pred]))
+                ui.record_result(pred, action_index, probs)
             ui.draw_cue(action_index)  # 动作名 + 右侧实时正确率
             ui.flip()
             if ui.quit_requested():
