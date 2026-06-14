@@ -86,6 +86,10 @@ def main() -> int:
     parser.add_argument(
         "--selftest", action="store_true", help="无界面自检（不打开 PsychoPy 窗口）"
     )
+    parser.add_argument(
+        "--config", default=None,
+        help="范式配置文件(TOML)路径；缺省时若仓库根目录存在 paradigm_config.toml 则自动加载",
+    )
     parser.add_argument("--fullscreen", action="store_true", help="全屏运行")
     parser.add_argument("--blocks", type=int, default=None, help="覆盖 block 数")
     parser.add_argument("--trials", type=int, default=None, help="覆盖每 block 试次数")
@@ -100,7 +104,22 @@ def main() -> int:
     if args.selftest:
         return _selftest()
 
-    cfg = ExperimentConfig()
+    # 默认值 < 配置文件 < 命令行参数
+    from pathlib import Path
+
+    from .config import load_config
+
+    if args.config is not None:
+        cfg = load_config(args.config)
+        print(f"[run] 已加载范式配置: {args.config}")
+    else:
+        default_cfg = Path(__file__).resolve().parent.parent / "paradigm_config.toml"
+        if default_cfg.exists():
+            cfg = load_config(default_cfg)
+            print(f"[run] 已加载默认范式配置: {default_cfg}")
+        else:
+            cfg = ExperimentConfig()
+
     if args.fullscreen:
         cfg.fullscreen = True
     if args.blocks is not None:

@@ -1,11 +1,14 @@
 """实验配置。
 
-所有可调参数集中在 :class:`ExperimentConfig`，便于在 ``run.py`` 中按需覆盖，
-不必改动逻辑代码。
+所有可调参数集中在 :class:`ExperimentConfig`。既可在代码中直接构造，也可用
+:func:`load_config` 从外部 TOML 文件加载（见仓库根目录 ``paradigm_config.toml``），便于在
+不改动代码的前提下调整范式参数。优先级：默认值 < 配置文件 < 命令行参数。
 """
 
 from __future__ import annotations
 
+import dataclasses
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -97,3 +100,52 @@ class ExperimentConfig:
             raise ValueError("n_channels 与 window_samples 必须为正")
         if self.train_n_samples <= 0:
             raise ValueError("train_n_samples 必须为正")
+        if self.train_n_samples > self.history_size:
+            print(
+                f"[config] 警告：train_n_samples({self.train_n_samples}) > "
+                f"history_size({self.history_size})，每次实际可用样本受限于 history_size"
+            )
+
+    # --- 从外部配置文件加载 --------------------------------------------------
+    @classmethod
+    def from_dict(cls, data: dict, base_dir: Path | None = None) -> "ExperimentConfig":
+        """由（TOML/JSON 解析得到的）字典构造配置；未提供的字段沿用默认值。
+
+        会做必要的类型转换：``actions`` 列表 -> :class:`ActionDef`；颜色/窗口尺寸
+        列表 -> 元组；``media_dir`` 相对路径相对 ``base_dir`` 解析；``random_seed``
+        为负数视作 ``None``（不固定种子）。未知字段会被忽略并告警。
+        """
+        known = {f.name for f in dataclasses.fields(cls)}
+        kwargs: dict = {}
+        for key, value in data.items():
+            if key not in known:
+                print(f"[config] 忽略未知参数: {key!r}")
+                continue
+            kwargs[key] = value
+
+        if "actions" in kwargs:
+            kwargs["actions"] = [
+                a if isinstance(a, ActionDef) else ActionDef(**a) for a in kwargs["actions"]
+            ]
+        for tup_field in ("window_size", "background_color", "text_color"):
+            if tup_field in kwargs and isinstance(kwargs[tup_field], list):
+                kwargs[tup_field] = tuple(kwargs[tup_field])
+        if "media_dir" in kwargs:
+            md = Path(kwargs["media_dir"])
+            if not md.is_absolute() and base_dir is not None:
+                md = (base_dir / md).resolve()
+            kwargs["media_dir"] = md
+        if kwargs.get("random_seed") is not None and kwargs["random_seed"] < 0:
+            kwargs["random_seed"] = None
+
+        cfg = cls(**kwargs)
+        cfg.validate()
+        return cfg
+
+
+def load_config(path: str | Path) -> ExperimentConfig:
+    """从 TOML 文件加载 :class:`ExperimentConfig`。相对路径（如 media_dir）相对该文件所在目录解析。"""
+    path = Path(path)
+    with open(path, "rb") as f:
+        data = tomllib.load(f)
+    return ExperimentConfig.from_dict(data, base_dir=path.parent)
