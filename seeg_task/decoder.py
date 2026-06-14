@@ -1,21 +1,27 @@
 """实时解码模块。
 
-I/O 契约（保持稳定，便于替换为真实模型）::
+:class:`BaseDecoder` 定义解码器接口（抽象基类，仅声明不实现），含两个接口函数：
 
-    Decoder.predict(x: np.ndarray) -> np.ndarray
+    predict(x: np.ndarray) -> np.ndarray              # 推理
         x      : 形状 (n_channels, n_samples)
         返回值 : 形状 (n_classes,) 的概率分布 (>=0 且和为 1)，即 one-hot 概率分布
 
-解码器内部持有一个 ``model`` 对象，并用锁保护，支持在 block 间休息时由训练线程
-**热替换**（:meth:`Decoder.swap_model`）。``model`` 只需实现 ``infer(features) -> logits``，
-``features`` 由 :func:`extract_features` 从原始 ``x`` 提取。
+    update(samples: list[tuple[np.ndarray, int]]) -> bool   # 模型更新
+        samples: [(x, label), ...]；返回是否实际更新了模型
 
-要接入真实模型：实现一个同样具备 ``infer(features)`` 的对象（或直接在 ``LinearModel``
-基础上扩展），其余流程无需改动；也可重写 :func:`extract_features` 改用你自己的特征。
+:class:`Decoder` 是其参考实现。要接入自定义解码器，只需继承 :class:`BaseDecoder` 并实现
+:meth:`predict` 与 :meth:`update`（以及 :meth:`from_config`），即可直接被 ``Experiment``
+使用，其余代码无需改动。
+
+参考实现 :class:`Decoder` 内部持有 ``model`` 与一个 :class:`~seeg_task.model_update.ModelTrainer`：
+推理用 ``model.infer``；更新时由 trainer 重新拟合并在锁内**热替换** ``model``。``model`` 只需
+实现 ``infer(features) -> logits``，``features`` 由 :func:`extract_features` 提取（可重写）。
 """
 
 from __future__ import annotations
 
+import abc
+import importlib
 import threading
 
 import numpy as np
@@ -69,16 +75,82 @@ class LinearModel:
         return self.weights @ features + self.bias
 
 
-class Decoder:
-    """线程安全的实时解码器。"""
+class BaseDecoder(abc.ABC):
+    """实时解码器接口（抽象基类，仅定义接口，不含实现）。
 
-    def __init__(self, model: LinearModel, n_classes: int) -> None:
+    一个解码器需具备两项能力，对应下面两个接口函数：
+
+    1. **推理** :meth:`predict` —— 把单个采集窗口映射为类别概率分布；
+    2. **模型更新** :meth:`update` —— 用历史样本在线更新自身模型。
+
+    ``Experiment`` 仅依赖这两个方法（外加 :meth:`from_config` 构造）；自定义解码器继承
+    本类并实现它们即可接入范式，无需改动其它代码。约定实现应提供整型属性 ``n_classes``。
+    """
+
+    n_classes: int
+
+    @abc.abstractmethod
+    def predict(self, x: np.ndarray) -> np.ndarray:
+        """推理：对单个采集窗口解码。
+
+        Args:
+            x: 形状 ``(n_channels, n_samples)`` 的原始信号窗口。
+
+        Returns:
+            形状 ``(n_classes,)`` 的概率分布（每个元素 >=0 且总和为 1）。
+        """
+        raise NotImplementedError
+
+    @abc.abstractmethod
+    def update(self, samples: "list[tuple[np.ndarray, int]]") -> bool:
+        """模型更新：用历史样本在线更新内部模型。
+
+        在 block 间休息时由后台线程调用，因此实现需**线程安全**（可能与 :meth:`predict`
+        并发）。
+
+        Args:
+            samples: ``[(x, label), ...]``，``x`` 形状 ``(n_channels, n_samples)``。
+
+        Returns:
+            是否实际更新了模型；样本不足等情况可返回 ``False`` 表示本次跳过。
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def from_config(cls, config, rng: np.random.Generator | None = None, **params) -> "BaseDecoder":
+        """从配置构造解码器实例（供 :func:`create_decoder` 按 ``config.decoder_class`` 调用）。
+
+        子类需重写本方法以定义自身的构造方式；``params`` 来自 ``config.decoder_params``。
+        """
+        raise NotImplementedError(
+            f"{cls.__name__} 未实现 from_config；请在子类中实现以支持从配置文件构造"
+        )
+
+
+class Decoder(BaseDecoder):
+    """线程安全的实时解码器（:class:`BaseDecoder` 的参考实现）。
+
+    推理用内部 ``model`` 的 ``infer``；模型更新用内部 :class:`~seeg_task.model_update.ModelTrainer`
+    重新拟合并热替换 ``model``（在锁内完成，保证与并发 :meth:`predict` 安全）。
+    """
+
+    def __init__(self, model: LinearModel, n_classes: int, trainer=None) -> None:
         self._model = model
         self.n_classes = n_classes
+        self._trainer = trainer  # ModelTrainer | None；为 None 时 update 会报错提示
         self._lock = threading.Lock()
 
+    @classmethod
+    def from_config(cls, config, rng: np.random.Generator | None = None, **params) -> "Decoder":
+        from .model_update import ModelTrainer  # 延迟导入避免与 model_update 循环依赖
+
+        rng = rng if rng is not None else np.random.default_rng(config.random_seed)
+        model = LinearModel.random_init(config.n_classes, config.n_channels, rng)
+        trainer = ModelTrainer(config.n_classes, config.n_channels)
+        return cls(model, config.n_classes, trainer=trainer)
+
     def predict(self, x: np.ndarray) -> np.ndarray:
-        """对单个窗口解码，返回 ``(n_classes,)`` 概率分布。"""
+        """推理：对单个窗口解码，返回 ``(n_classes,)`` 概率分布。"""
         features = extract_features(x)
         with self._lock:
             logits = self._model.infer(features)
@@ -89,8 +161,18 @@ class Decoder:
             )
         return probs
 
+    def update(self, samples: "list[tuple[np.ndarray, int]]") -> bool:
+        """模型更新：用历史样本重新拟合并热替换内部模型，线程安全。"""
+        if self._trainer is None:
+            raise RuntimeError("Decoder 未配置 trainer，无法执行 update")
+        new_model = self._trainer.train(samples)
+        if new_model is None:
+            return False
+        self.swap_model(new_model)
+        return True
+
     def swap_model(self, new_model: LinearModel) -> None:
-        """热替换内部模型（由训练线程在休息期调用）。"""
+        """热替换内部模型（线程安全）；供 :meth:`update` 调用，也可外部直接替换。"""
         with self._lock:
             self._model = new_model
 
@@ -98,3 +180,59 @@ class Decoder:
     def model(self) -> LinearModel:
         with self._lock:
             return self._model
+
+
+class DummyDecoder(BaseDecoder):
+    """占位解码器（:class:`BaseDecoder` 的最简实现）。
+
+    不依赖任何模型/训练：:meth:`predict` 返回一个随机概率分布，:meth:`update` 直接跳过。
+    用于无真实模型时打通整条范式（界面、采集、入缓冲、休息流程）。注意正确率不具备真实
+    含义，应在随机水平附近波动。
+
+    可选参数（来自 ``config.decoder_params``）：
+        seed: 随机种子，便于复现；为空时用 ``config.random_seed``。
+    """
+
+    def __init__(self, n_classes: int, rng: np.random.Generator | None = None) -> None:
+        self.n_classes = n_classes
+        self._rng = rng if rng is not None else np.random.default_rng()
+
+    @classmethod
+    def from_config(cls, config, rng: np.random.Generator | None = None, **params) -> "DummyDecoder":
+        seed = params.get("seed", config.random_seed)
+        rng = rng if rng is not None else np.random.default_rng(seed)
+        return cls(config.n_classes, rng=rng)
+
+    def predict(self, x: np.ndarray) -> np.ndarray:
+        """推理：忽略输入，返回一个随机概率分布（和为 1）。"""
+        return softmax(self._rng.standard_normal(self.n_classes))
+
+    def update(self, samples: "list[tuple[np.ndarray, int]]") -> bool:
+        """模型更新：占位解码器无模型，直接跳过。"""
+        return False
+
+
+def create_decoder(config, rng: np.random.Generator | None = None) -> BaseDecoder:
+    """按 ``config.decoder_class`` 动态导入并构造解码器实例。
+
+    ``config.decoder_class`` 为完整导入路径（如 ``"seeg_task.decoder.Decoder"`` 或
+    ``"mypkg.mymod.MyDecoder"``），对应类须为 :class:`BaseDecoder` 的子类并实现
+    :meth:`BaseDecoder.from_config`。``config.decoder_params`` 作为关键字参数透传给它。
+    """
+    target = config.decoder_class
+    module_path, _, class_name = target.rpartition(".")
+    if not module_path:
+        raise ValueError(
+            f"decoder_class 需为完整导入路径（如 'seeg_task.decoder.Decoder'），实际: {target!r}"
+        )
+    try:
+        module = importlib.import_module(module_path)
+        cls = getattr(module, class_name)
+    except (ImportError, AttributeError) as exc:
+        raise ImportError(f"无法导入解码器类 {target!r}: {exc}") from exc
+
+    if not (isinstance(cls, type) and issubclass(cls, BaseDecoder)):
+        raise TypeError(f"{target} 不是 BaseDecoder 的子类")
+
+    params = dict(getattr(config, "decoder_params", {}) or {})
+    return cls.from_config(config, rng=rng, **params)

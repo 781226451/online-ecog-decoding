@@ -63,6 +63,12 @@ class ExperimentConfig:
     lsl_stream_type: str = "EEG"         # 按流类型解析（如 'EEG' / 'sEEG'）
     lsl_resolve_timeout: float = 5.0     # 解析流的超时（秒）
 
+    # ---- 解码器 -------------------------------------------------------------
+    # 解码器子类的完整导入路径（须为 decoder.BaseDecoder 的子类，并实现 from_config）。
+    decoder_class: str = "seeg_task.decoder.Decoder"
+    # 传给该子类 from_config 的额外参数（dict），按需自定义。
+    decoder_params: dict = field(default_factory=dict)
+
     # ---- 在线模型更新 -------------------------------------------------------
     history_size: int = 256          # HistoryBuffer 容量 (最多保留多少历史样本)
     train_n_samples: int = 64        # 每个 block 后送入训练的历史样本数 n

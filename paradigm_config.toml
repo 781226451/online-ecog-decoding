@@ -31,6 +31,15 @@ source_type = "synthetic"    # "lsl" | "dummy" | "synthetic"
 lsl_stream_type = "EEG"          # 按流类型解析（lsl_stream_name 为空时生效）
 lsl_resolve_timeout = 5.0        # 解析 LSL 流的超时（秒）
 
+# ---- 解码器 ----------------------------------------------------------------
+# 在范式中运行的解码器子类（完整导入路径，须为 BaseDecoder 子类并实现 from_config）。
+# 内置可选：
+#   "seeg_task.decoder.Decoder"        线性模型 + 在线训练（默认）
+#   "seeg_task.decoder.DummyDecoder"   占位：随机概率、不训练，用于无模型联调
+# 自定义示例：decoder_class = "mypkg.mymodule.MyDecoder"
+decoder_class = "seeg_task.decoder.Decoder"
+# 传给解码器 from_config 的额外参数见文件末尾可选的 [decoder_params] 表。
+
 # ---- 在线模型更新 ----------------------------------------------------------
 history_size = 256           # 历史样本缓冲容量（最多保留多少 (x,label) 样本）
 train_n_samples = 64         # 每个 block 后送入训练的历史样本数 n（不应大于 history_size）
@@ -58,3 +67,10 @@ actions = [
     { key = "feet",       label = "双脚背屈" },
     { key = "tongue",     label = "伸舌" },
 ]
+
+# ---- 解码器额外参数（可选，透传给 decoder_class.from_config）---------------
+# 必须置于文件末尾（TOML 表头之后的键都归属该表）。默认空表。
+# 示例：
+# [decoder_params]
+# checkpoint = "models/my_decoder.pt"
+# device = "cuda"

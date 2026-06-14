@@ -10,13 +10,14 @@
 | 配置层 | `config.ExperimentConfig` / `ActionDef` / `load_config` | 集中所有可调参数（动作集、时长、通道/采样、信号源类型、LSL 参数、显示）；可由根目录 `paradigm_config.toml`（范式配置文件）外部加载，优先级：默认值 < 配置文件 < 命令行 |
 | 编排层 | `experiment.Experiment` | block-trial 主循环、采集→解码→反馈、休息期后台训练与模型热替换 |
 | 采集层 | `signal_source.*` + `create_source()` | 统一接口 `SignalSource`，三实现：`LSLSource`（外部实时）/`DummySource`（纯随机）/`SyntheticSource`（可分模拟） |
-| 解码层 | `decoder.Decoder` / `LinearModel` / `extract_features` / `softmax` | 线程安全实时解码：`predict(x)→概率分布`，`swap_model` 热替换 |
-| 在线更新层 | `model_update.HistoryBuffer` / `ModelTrainer` | 历史样本缓冲 + 离线训练产出新模型 |
+| 解码层 | `decoder.BaseDecoder`（接口）/ `Decoder` / `LinearModel` / `create_decoder` | 解码器接口定义两函数：`predict`（推理）、`update`（模型更新）；`Decoder` 为参考实现，可由 `config.decoder_class` 动态指定子类 |
+| 在线更新层 | `model_update.HistoryBuffer` / `ModelTrainer` | 历史样本缓冲；`Decoder.update` 内部用 `ModelTrainer` 重新拟合并热替换模型 |
 | 界面层 | `ui.ExperimentUI` / `MediaPlayer` | PsychoPy 可视化：左=动作提示+gif/视频，右=当前动作正确率，休息页 |
 
 **核心契约**（替换真实算法时保持不变）：
-- 解码：`Decoder.predict(ndarray[通道,采样点]) -> ndarray[n_classes]`（概率分布，和为 1）
-- 训练：`ModelTrainer.train([(x,label),...]) -> model`（实现 `infer(features)->logits` 即可被 `swap_model` 接收）
+- 推理：`BaseDecoder.predict(ndarray[通道,采样点]) -> ndarray[n_classes]`（概率分布，和为 1）
+- 模型更新：`BaseDecoder.update([(x,label),...]) -> bool`（用历史样本在线更新自身模型，线程安全）
+- 构造：`BaseDecoder.from_config(config, rng, **params)`（供 `create_decoder` 按 `config.decoder_class` 调用）
 
 ## 2. 组件架构图
 
@@ -40,7 +41,7 @@ flowchart TB
     LSL["LSLSource<br/>后台拉流线程"]
   end
   subgraph DEC["解码层"]
-    DECODER["Decoder<br/>predict / swap_model (Lock)"]
+    DECODER["BaseDecoder 接口<br/>predict / update (Lock)"]
     MODEL["LinearModel"]
     FEAT["extract_features<br/>softmax"]
   end
@@ -67,9 +68,9 @@ flowchart TB
   EXP --> DECODER --> MODEL
   DECODER --> FEAT
   EXP --> BUF
-  EXP --> TRAIN
-  TRAIN --> BUF
-  TRAIN -. 新模型 .-> DECODER
+  EXP -. update(样本快照) .-> DECODER
+  DECODER --> TRAIN
+  TRAIN -. 新模型(热替换) .-> MODEL
   EXP --> UI --> MP --> MEDIA
 ```
 
@@ -82,25 +83,24 @@ sequenceDiagram
   participant D as Decoder
   participant H as HistoryBuffer
   participant U as ExperimentUI
-  participant T as ModelTrainer(线程)
 
   Note over E,U: 单个 trial
   E->>U: draw_fixation / draw_cue（注视 + 提示采集期）
   E->>S: read_window(true_label)
   S-->>E: x  (通道 × 采样点)
-  E->>D: predict(x)
+  E->>D: predict(x)  # 推理
   D-->>E: probs (n_classes)
   E->>U: record_result(argmax, label) + draw_feedback
   E->>H: add(x, label)
 
-  Note over E,T: block 结束 → 休息期
+  Note over E,D: block 结束 → 休息期
   E->>H: recent(n)
   H-->>E: samples
-  E-)T: train(samples)  后台线程启动
+  E-)D: update(samples)  # 后台线程：内部训练 + 锁内热替换
   loop 休息倒计时
     E->>U: draw_rest(remaining, status)
   end
-  T--)D: swap_model(new_model)  训练完成后热替换
+  D--)E: 返回 updated(bool) → 状态文案
 ```
 
 ## 4. 并发模型
@@ -115,13 +115,13 @@ LSL 拉流线程 (LSLSource._pull_loop, 仅 source=lsl)
   └─ 持续 pull_chunk → deque 环形缓冲 (self._lock 保护)
      read_window() 在主线程取缓冲快照并转置
 
-训练线程 (Experiment._rest_and_train, 仅休息期临时存在)
-  └─ ModelTrainer.train(历史样本快照) → 新 LinearModel
-     → Decoder.swap_model() 在 Decoder._lock 下原子替换
+更新线程 (Experiment._rest_and_train, 仅休息期临时存在)
+  └─ Decoder.update(历史样本快照)：内部 ModelTrainer.train → 新 LinearModel
+     → 在 Decoder._lock 下原子热替换
 ```
 
-- `Decoder._lock`：`predict`（主线程）与 `swap_model`（训练线程）互斥，保证热替换原子。
-- `HistoryBuffer._lock`：`add`（主线程）与 `recent`（训练线程读快照）互斥。
+- `Decoder._lock`：`predict`（主线程）与 `update` 内部的热替换（更新线程）互斥，保证替换原子。
+- `HistoryBuffer._lock`：`add`（主线程）与 `recent`（更新线程读快照）互斥。
 - `LSLSource._lock`：拉流线程写、主线程读，二者互斥。
 - 训练以历史样本**快照**为输入，训练期间主线程可继续采集/入缓冲，互不阻塞。
 

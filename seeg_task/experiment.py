@@ -8,8 +8,8 @@ import numpy as np
 from psychopy import core
 
 from .config import ExperimentConfig
-from .decoder import Decoder, LinearModel
-from .model_update import HistoryBuffer, ModelTrainer
+from .decoder import BaseDecoder, create_decoder
+from .model_update import HistoryBuffer
 from .signal_source import SignalSource, create_source
 from .ui import ExperimentUI
 
@@ -25,21 +25,17 @@ class Experiment:
         self,
         config: ExperimentConfig | None = None,
         source: SignalSource | None = None,
-        decoder: Decoder | None = None,
-        trainer: ModelTrainer | None = None,
+        decoder: BaseDecoder | None = None,
     ) -> None:
         self.config = config or ExperimentConfig()
         self.config.validate()
         cfg = self.config
 
         self.rng = np.random.default_rng(cfg.random_seed)
-        n_features = cfg.n_channels  # extract_features 输出长度 = 通道数
 
         self.source = source or create_source(cfg, rng=self.rng)
-        self.decoder = decoder or Decoder(
-            LinearModel.random_init(cfg.n_classes, n_features, self.rng), cfg.n_classes
-        )
-        self.trainer = trainer or ModelTrainer(cfg.n_classes, n_features)
+        # 解码器自带推理与模型更新能力（update 内部完成训练 + 热替换）
+        self.decoder = decoder or create_decoder(cfg, rng=self.rng)
         self.history = HistoryBuffer(cfg.history_size)
 
         self.ui: ExperimentUI | None = None
@@ -96,12 +92,13 @@ class Experiment:
         cfg = self.config
 
         samples = self.history.recent(cfg.train_n_samples)
-        result: dict[str, LinearModel | None] = {}
+        result: dict[str, bool] = {}
         error: dict[str, BaseException] = {}
 
         def worker() -> None:
             try:
-                result["model"] = self.trainer.train(samples)
+                # 解码器自行训练并热替换内部模型（线程安全）
+                result["updated"] = self.decoder.update(samples)
             except BaseException as exc:  # noqa: BLE001 - 把异常带回主线程展示
                 error["err"] = exc
 
@@ -114,27 +111,26 @@ class Experiment:
         while clock.getTime() < cfg.rest_duration:
             remaining = cfg.rest_duration - clock.getTime()
             if not applied and not thread.is_alive():
-                status = self._apply_trained_model(result, error)
+                status = self._update_status(result, error)
                 applied = True
             ui.draw_rest(remaining, status)
             ui.flip()
             if ui.quit_requested():
                 raise QuitExperiment
 
-        # 休息结束仍未训完（极少见）：阻塞等待再热替换，保证模型确有更新。
+        # 休息结束仍未训完（极少见）：阻塞等待，保证模型更新已完成。
         if not applied:
             thread.join()
-            self._apply_trained_model(result, error)
+            self._update_status(result, error)
 
-    def _apply_trained_model(self, result: dict, error: dict) -> str:
+    def _update_status(self, result: dict, error: dict) -> str:
+        """把后台 decoder.update 的结果转成休息界面的状态文案。"""
         if "err" in error:
-            print(f"[训练] 失败: {error['err']}")
+            print(f"[模型更新] 失败: {error['err']}")
             return "模型更新失败，沿用当前模型"
-        new_model = result.get("model")
-        if new_model is None:
-            return "样本不足，本次跳过更新"
-        self.decoder.swap_model(new_model)
-        return "模型已更新 ✓"
+        if result.get("updated"):
+            return "模型已更新 ✓"
+        return "样本不足，本次跳过更新"
 
     # --- 入口 ---------------------------------------------------------------
     def run(self) -> None:
