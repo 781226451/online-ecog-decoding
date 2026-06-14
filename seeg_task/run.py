@@ -9,14 +9,26 @@
 from __future__ import annotations
 
 import argparse
+import sys
 
 import numpy as np
+from loguru import logger
 
 from .config import ExperimentConfig
 
 
+def _configure_logging(level: str = "INFO", log_file: str | None = None) -> None:
+    """配置 Loguru：控制台输出，可选同时写入文件（按级别过滤）。"""
+    level = str(level).upper()
+    logger.remove()  # 移除 Loguru 默认 handler，避免重复输出
+    logger.add(sys.stderr, level=level)
+    if log_file:
+        logger.add(log_file, level=level, encoding="utf-8")
+
+
 def _selftest() -> int:
     """不打开窗口，验证核心数据/模型契约。返回 0 表示通过。"""
+    _configure_logging("WARNING")  # 抑制自检中数百次 predict 的 INFO 日志
     from .decoder import Decoder, LinearModel, extract_features
     from .model_update import HistoryBuffer, ModelTrainer
     from .signal_source import SyntheticSource
@@ -99,6 +111,8 @@ def main() -> int:
     )
     parser.add_argument("--lsl-name", default=None, help="LSL 流名（source=lsl 时）")
     parser.add_argument("--lsl-type", default=None, help="LSL 流类型，默认 EEG（source=lsl 时）")
+    parser.add_argument("--log-level", default=None, help="日志级别 DEBUG/INFO/WARNING/...")
+    parser.add_argument("--log-file", default=None, help="日志文件路径；缺省仅输出到控制台")
     args = parser.parse_args()
 
     if args.selftest:
@@ -132,6 +146,12 @@ def main() -> int:
         cfg.lsl_stream_name = args.lsl_name
     if args.lsl_type is not None:
         cfg.lsl_stream_type = args.lsl_type
+    if args.log_level is not None:
+        cfg.log_level = args.log_level
+    if args.log_file is not None:
+        cfg.log_file = args.log_file
+
+    _configure_logging(cfg.log_level, cfg.log_file)
 
     from .experiment import Experiment
 

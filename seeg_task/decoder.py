@@ -25,6 +25,7 @@ import importlib
 import threading
 
 import numpy as np
+from loguru import logger
 
 
 def extract_features(x: np.ndarray) -> np.ndarray:
@@ -159,16 +160,21 @@ class Decoder(BaseDecoder):
             raise ValueError(
                 f"模型输出维度 {probs.shape} 与类别数 {self.n_classes} 不一致"
             )
+        pred = int(np.argmax(probs))
+        logger.info("predict | x={} -> class={} p={:.3f}", tuple(x.shape), pred, float(probs[pred]))
         return probs
 
     def update(self, samples: "list[tuple[np.ndarray, int]]") -> bool:
         """模型更新：用历史样本重新拟合并热替换内部模型，线程安全。"""
         if self._trainer is None:
             raise RuntimeError("Decoder 未配置 trainer，无法执行 update")
+        logger.info("update | 开始训练，样本数={}", len(samples))
         new_model = self._trainer.train(samples)
         if new_model is None:
+            logger.info("update | 样本不足，跳过本次更新")
             return False
         self.swap_model(new_model)
+        logger.info("update | 训练完成，模型已热替换")
         return True
 
     def swap_model(self, new_model: LinearModel) -> None:
@@ -205,10 +211,14 @@ class DummyDecoder(BaseDecoder):
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         """推理：忽略输入，返回一个随机概率分布（和为 1）。"""
-        return softmax(self._rng.standard_normal(self.n_classes))
+        probs = softmax(self._rng.standard_normal(self.n_classes))
+        pred = int(np.argmax(probs))
+        logger.info("predict(dummy) | x={} -> class={} p={:.3f}", tuple(x.shape), pred, float(probs[pred]))
+        return probs
 
     def update(self, samples: "list[tuple[np.ndarray, int]]") -> bool:
         """模型更新：占位解码器无模型，直接跳过。"""
+        logger.info("update(dummy) | 样本数={} -> 无模型，跳过", len(samples))
         return False
 
 

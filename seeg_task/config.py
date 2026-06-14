@@ -88,6 +88,10 @@ class ExperimentConfig:
     media_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent / "media")
     gif_frame_duration: float = 0.05  # gif 缺少帧时长信息时的回退帧间隔（秒）
 
+    # ---- 日志 ---------------------------------------------------------------
+    log_level: str = "INFO"           # 日志级别：DEBUG/INFO/WARNING/ERROR
+    log_file: str | None = None       # 日志文件路径（相对则相对配置文件目录）；为空仅输出到控制台
+
     # ---- 杂项 ---------------------------------------------------------------
     random_seed: int | None = 0       # 模拟数据与试次顺序的可复现种子；None 表示不固定
 
@@ -142,6 +146,11 @@ class ExperimentConfig:
             if not md.is_absolute() and base_dir is not None:
                 md = (base_dir / md).resolve()
             kwargs["media_dir"] = md
+        if kwargs.get("log_file"):
+            lf = Path(kwargs["log_file"])
+            if not lf.is_absolute() and base_dir is not None:
+                lf = (base_dir / lf).resolve()
+            kwargs["log_file"] = str(lf)
         if kwargs.get("random_seed") is not None and kwargs["random_seed"] < 0:
             kwargs["random_seed"] = None
 

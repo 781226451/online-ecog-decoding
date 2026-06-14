@@ -56,6 +56,10 @@ font_candidates = ["PingFang SC", "Heiti SC", "STHeiti", "Arial Unicode MS", "Si
 media_dir = "media"          # 相对路径相对本配置文件所在目录解析
 gif_frame_duration = 0.05    # gif 缺少帧时长信息时的回退帧间隔（秒）
 
+# ---- 日志 ------------------------------------------------------------------
+log_level = "INFO"           # DEBUG/INFO/WARNING/ERROR；predict 与 update 在 INFO 级别写日志
+# log_file = "logs/run.log"  # 取消注释则同时写入文件（相对路径相对本配置文件目录）
+
 # ---- 杂项 ------------------------------------------------------------------
 random_seed = 0              # 可复现种子；填负数（如 -1）表示不固定种子
 
