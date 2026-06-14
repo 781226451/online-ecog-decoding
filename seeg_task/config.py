@@ -65,7 +65,8 @@ class ExperimentConfig:
 
     # ---- 解码器 -------------------------------------------------------------
     # 解码器子类的完整导入路径（须为 decoder.BaseDecoder 的子类，并实现 from_config）。
-    decoder_class: str = "seeg_task.decoder.Decoder"
+    # 未在配置中给定时，默认使用 DummyDecoder（占位：随机概率、不训练，用于无模型联调）。
+    decoder_class: str = "seeg_task.decoder.DummyDecoder"
     # 传给该子类 from_config 的额外参数（dict），按需自定义。
     decoder_params: dict = field(default_factory=dict)
 

@@ -33,11 +33,11 @@ lsl_resolve_timeout = 5.0        # 解析 LSL 流的超时（秒）
 
 # ---- 解码器 ----------------------------------------------------------------
 # 在范式中运行的解码器子类（完整导入路径，须为 BaseDecoder 子类并实现 from_config）。
-# 内置可选：
-#   "seeg_task.decoder.Decoder"        线性模型 + 在线训练（默认）
-#   "seeg_task.decoder.DummyDecoder"   占位：随机概率、不训练，用于无模型联调
-# 自定义示例：decoder_class = "mypkg.mymodule.MyDecoder"
-decoder_class = "seeg_task.decoder.Decoder"
+# 未给定（保持下面一行注释）时，默认使用 DummyDecoder（随机概率、不训练，无模型联调）。
+# 需要真实/自定义解码器时取消注释并指定，例如：
+#   decoder_class = "seeg_task.decoder.Decoder"     线性模型 + 在线训练
+#   decoder_class = "mypkg.mymodule.MyDecoder"       自定义
+# decoder_class = "seeg_task.decoder.Decoder"
 # 传给解码器 from_config 的额外参数见文件末尾可选的 [decoder_params] 表。
 
 # ---- 在线模型更新 ----------------------------------------------------------
