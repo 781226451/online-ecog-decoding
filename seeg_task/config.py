@@ -86,6 +86,7 @@ class ExperimentConfig:
     )
 
     # ---- 媒体素材 -----------------------------------------------------------
+    show_media: bool = True           # 是否显示动作 gif/视频；False 则左侧仅用文字表述
     media_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent / "media")
     gif_frame_duration: float = 0.05  # gif 缺少帧时长信息时的回退帧间隔（秒）
 

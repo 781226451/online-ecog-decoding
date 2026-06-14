@@ -54,6 +54,7 @@ text_color = [1.0, 1.0, 1.0]
 font_candidates = ["PingFang SC", "Heiti SC", "STHeiti", "Arial Unicode MS", "SimHei"]
 
 # ---- 媒体素材 --------------------------------------------------------------
+show_media = false           # 暂时屏蔽 gif/视频，左侧仅用文字表述动作（改 true 恢复）
 media_dir = "media"          # 相对路径相对本配置文件所在目录解析
 gif_frame_duration = 0.05    # gif 缺少帧时长信息时的回退帧间隔（秒）
 

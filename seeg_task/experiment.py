@@ -63,14 +63,15 @@ class Experiment:
         x, probs = self._run_cue(action_index)
         ui.stop_trial_media(action_index)
 
-        # 3) 兜底：cue 期未产生预测（极短 cue）则末尾解码一次
+        # 3) 兜底：cue 期未产生预测（极短 cue）则末尾解码一次并计入
         if probs is None:
             x = self.source.read_window(true_label=action_index)
             probs = self.decoder.predict(x)
+            ui.record_result(int(np.argmax(probs)), action_index, probs)
 
-        # 4) 用最近一次解码计入结果
+        # 4) 取最近一次解码用于反馈（统计已在 cue 期每次 predict 时实时计入，此处不重复记录）
         predicted = int(np.argmax(probs))
-        correct = ui.record_result(predicted, action_index, probs)
+        correct = predicted == action_index
 
         # 5) 入历史缓冲（供 block 后训练）
         self.history.add(x, action_index)
@@ -83,8 +84,9 @@ class Experiment:
     def _run_cue(self, action_index: int):
         """cue 采集期：逐帧绘制，并每隔 ``predict_interval`` 在主线程做一次 predict。
 
-        返回最近一次的 ``(x, probs)``（用于计入 trial 结果）。每次 predict 都会经 Loguru 记日志，
-        从而在采集期内形成实时滚动解码的可观测输出。
+        每次 predict 都即时计入分类正确率统计（:meth:`ExperimentUI.record_result`），
+        因此右面板正确率在采集期内**实时刷新**；同时经 Loguru 记日志。返回最近一次的
+        ``(x, probs)`` 供反馈使用。
         """
         ui = self.ui
         cfg = self.config
@@ -99,6 +101,8 @@ class Experiment:
                 tick.reset()
                 last_x = self.source.read_window(true_label=action_index)
                 last_probs = self.decoder.predict(last_x)
+                # 实时计入正确率 -> 右面板每帧据此刷新
+                ui.record_result(int(np.argmax(last_probs)), action_index, last_probs)
             ui.draw_cue(action_index)
             ui.flip()
             if ui.quit_requested():

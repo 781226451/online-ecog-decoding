@@ -227,16 +227,12 @@ class ExperimentUI:
             text="(无动作素材)", height=0.04, pos=(self._left_x, -0.02),
             color=(0.4, 0.4, 0.4),
         )
-        # 左面板：反馈文字
-        self.feedback_text = self._text(text="", height=0.06, pos=(self._left_x, -0.42))
 
-        # 右面板：当前动作的分类正确率
+        # 右面板：当前动作的实时分类正确率（标题 + 大号百分比）
         self.acc_title = self._text(
-            text="当前动作正确率", height=0.055, pos=(self._right_x, 0.30), bold=True,
+            text="实时正确率", height=0.06, pos=(self._right_x, 0.12), bold=True,
         )
-        self.acc_action = self._text(text="", height=0.06, pos=(self._right_x, 0.14))
-        self.acc_value = self._text(text="--%", height=0.22, pos=(self._right_x, -0.06), bold=True)
-        self.acc_detail = self._text(text="", height=0.04, pos=(self._right_x, -0.26))
+        self.acc_value = self._text(text="--%", height=0.28, pos=(self._right_x, -0.08), bold=True)
 
         # 全屏提示用文字
         self.center_text = self._text(text="", height=0.05, pos=(0, 0), wrapWidth=self._half_w * 1.6)
@@ -246,9 +242,13 @@ class ExperimentUI:
 
     def _build_media_players(self) -> None:
         cfg = self.config
+        self.players: dict[int, MediaPlayer | None] = {}
+        if not cfg.show_media:  # 屏蔽 gif/视频：不加载任何素材
+            for i in range(len(cfg.actions)):
+                self.players[i] = None
+            return
         media_size = (min(0.6, self._half_w * 0.85), 0.42)
         media_pos = (self._left_x, -0.02)
-        self.players: dict[int, MediaPlayer | None] = {}
         for i, action in enumerate(cfg.actions):
             path = self._find_media(action.key)
             if path is None:
@@ -278,30 +278,21 @@ class ExperimentUI:
 
     # --- 绘制（不 flip）-----------------------------------------------------
     def draw_right_panel(self) -> None:
-        """右面板：仅显示「当前动作」的累计分类正确率。"""
+        """右面板：仅显示「当前动作」的实时分类正确率（标题 + 大号百分比）。"""
         i = self.current_action
-        if i is not None:
-            self.acc_action.text = self.config.actions[i].label
-            total = int(self.action_total[i])
-            if total:
-                pct = 100.0 * self.action_correct[i] / total
-                self.acc_value.text = f"{pct:.0f}%"
-            else:
-                self.acc_value.text = "--%"
-            self.acc_detail.text = f"正确 {int(self.action_correct[i])} / {total} 次"
+        if i is not None and int(self.action_total[i]) > 0:
+            self.acc_value.text = f"{100.0 * self.action_correct[i] / int(self.action_total[i]):.0f}%"
         else:
-            self.acc_action.text = ""
             self.acc_value.text = "--%"
-            self.acc_detail.text = ""
         self.acc_title.draw()
-        self.acc_action.draw()
         self.acc_value.draw()
-        self.acc_detail.draw()
 
     def draw_divider(self) -> None:
         self.divider.draw()
 
     def draw_left_media(self, action_index: int) -> None:
+        if not self.config.show_media:  # 纯文字模式：不画媒体/占位框，仅保留动作名文字
+            return
         player = self.players.get(action_index)
         if player is not None and player.kind != "none":
             player.draw()
@@ -328,19 +319,12 @@ class ExperimentUI:
         self.draw_right_panel()
 
     def draw_feedback(self, action_index: int, correct: bool, predicted_index: int) -> None:
+        # 左侧不显示任何解码结果文字，仅保留动作名 + 媒体 + 右侧正确率
         self.current_action = action_index
         self.action_title.text = self.config.actions[action_index].label
-        if correct:
-            self.feedback_text.text = "✓ 解码正确"
-            self.feedback_text.color = (0.1, 0.8, 0.2)
-        else:
-            pred_label = self.config.actions[predicted_index].label
-            self.feedback_text.text = f"✗ 解码为：{pred_label}"
-            self.feedback_text.color = (0.9, 0.3, 0.2)
         self.draw_divider()
         self.action_title.draw()
         self.draw_left_media(action_index)
-        self.feedback_text.draw()
         self.draw_right_panel()
 
     def draw_rest(self, remaining: float, status: str) -> None:
