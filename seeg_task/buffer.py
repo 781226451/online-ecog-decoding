@@ -4,14 +4,14 @@
 维护一个固定大小的滑动窗口，并在需要时把窗口连同标签打包存档：
 
 - ``current_item`` : 固定大小 ``(C, N)`` 的滑动窗口（C=通道数，N=采样点数），最旧在前。
-- :meth:`update_current_item` : 传入一列新数据 ``(C, 1)``，按 FIFO 推入——丢弃最旧一列、
-  在末尾追加新列（窗口整体“左移”一格）。
+- :meth:`update_current_items` : 传入 ``(C, k)`` 多列新数据，按 FIFO 推入——丢弃最旧、
+  在末尾追加（窗口整体左移 k 格）。
 - :meth:`update_buffer` : 传入一个整型 ``label``，把 ``current_item`` 的副本与 ``label`` 打包成
   定长 tuple ``(ndarray, int)`` 存入存档列表 :attr:`items`。
 - :meth:`clean` : 清除所有数据——把 ``current_item`` 重置为全 0，并清空已存档的 :attr:`items`。
 
-实现采用**环形缓冲**：:meth:`update_current_item` 仅写入一列 + 移动写指针（O(C)），把
-O(C·N) 的“有序化”推迟到读取 ``current_item`` 时才做，从而在高频逐样本推入时高效。
+实现采用**环形缓冲**：:meth:`update_current_items` 整段写入 + 移动写指针（O(k)），把
+O(C·N) 的“有序化”推迟到读取 ``current_item`` 时才做，从而在高频推入时高效。
 """
 
 from __future__ import annotations
@@ -39,22 +39,36 @@ class BlockBuffer:
         self._pos: int = 0
         self.items: list[tuple[np.ndarray, int]] = []
 
-    def update_current_item(self, sample: np.ndarray) -> None:
-        """FIFO 推入一列新数据（O(C)：仅写一列 + 移动写指针）。
+    def update_current_items(self, chunk: np.ndarray) -> None:
+        """批量 FIFO 推入多列新数据（按时间顺序，第 0 列最旧；最新的覆盖最旧的）。
+
+        用整段写入实现，O(k)（k=列数）且仅一两次拷贝；``k`` 可为 0（空操作）。
 
         Args:
-            sample: 形状 ``(n_channels, 1)``（也接受 ``(n_channels,)``）的一列新采样。
+            chunk: 形状 ``(n_channels, k)``。
         """
-        sample = np.asarray(sample, dtype=self.dtype)
-        if sample.shape == (self.n_channels, 1):
-            sample = sample[:, 0]
-        elif sample.shape != (self.n_channels,):
+        chunk = np.asarray(chunk, dtype=self.dtype)
+        if chunk.ndim != 2 or chunk.shape[0] != self.n_channels:
             raise ValueError(
-                f"sample 形状应为 ({self.n_channels}, 1)，实际 {sample.shape}"
+                f"chunk 形状应为 ({self.n_channels}, k)，实际 {chunk.shape}"
             )
-        # 写指针处即“最旧一列”，覆盖它等价于丢弃最旧、追加最新
-        self._buf[:, self._pos] = sample
-        self._pos = (self._pos + 1) % self.window_samples
+        k = chunk.shape[1]
+        if k == 0:
+            return
+        n = self.window_samples
+        if k >= n:
+            # 新数据已铺满整窗：只保留最后 n 列，写指针归零（最旧在第 0 列）
+            self._buf[:] = chunk[:, -n:]
+            self._pos = 0
+            return
+        end = self._pos + k
+        if end <= n:                       # 不跨越环边界
+            self._buf[:, self._pos:end] = chunk
+        else:                              # 跨越边界：拆成尾段 + 头段
+            first = n - self._pos
+            self._buf[:, self._pos:] = chunk[:, :first]
+            self._buf[:, : end - n] = chunk[:, first:]
+        self._pos = end % n
 
     @property
     def current_item(self) -> np.ndarray:

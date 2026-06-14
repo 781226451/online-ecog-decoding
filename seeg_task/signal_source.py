@@ -1,112 +1,134 @@
 """信号采集接口。
 
-信号源是**逐样本的流式数据源**：一次 :meth:`SignalSource.read_sample` 返回一列
-``(n_channels, 1)`` 新采样。窗口化（把样本聚成 ``(n_channels, N)``）由上层
-:class:`~seeg_task.buffer.BlockBuffer` 负责，因此信号源**不需要固定窗口长度**。
+信号源是**流式数据源**，对外只有三件事：
 
-本模块定义统一接口 :class:`SignalSource`，并提供三种实现：
+- :meth:`SignalSource.read`  : 一次性取走当前**全部可用**数据，返回 ``(n_channels, k)`` 或 ``None``。
+- :meth:`SignalSource.flush` : 丢弃尚未消费的全部数据。
+- :meth:`SignalSource.close` : 关闭并释放资源。
 
-- :class:`LSLSource`       : 通过 Lab Streaming Layer (pylsl) 接收**外部实时数据**。
-- :class:`DummySource`     : 纯随机噪声的 dummy 源，无需硬件即可跑通流程（无类别结构）。
-- :class:`SyntheticSource` : 带类别可分结构的模拟源，可让解码/在线训练的正确率有可观测的提升。
+窗口化（把样本聚成 ``(n_channels, N)``）由上层 :class:`~seeg_task.buffer.BlockBuffer` 负责，
+信号源不持有窗口长度。三种实现：
 
-用 :func:`create_source` 按 :class:`~seeg_task.config.ExperimentConfig` 选择具体实现。
-接入其它真实设备时，只需实现 :meth:`SignalSource.read_sample` 即可，其余代码无需改动。
+- :class:`LSLSource`       : 通过 Lab Streaming Layer (pylsl) 接收**外部实时数据**（后台线程入队，read 排空队列）。
+- :class:`DummySource`     : 纯随机噪声模拟源（无类别结构）。
+- :class:`SyntheticSource` : 带类别可分结构的模拟源，便于观测在线训练对正确率的提升。
+
+模拟源按 ``sampling_rate`` **自计时**产数：``read()`` 返回「距上次读取以来按采样率应产生的样本」，
+从而与真实流「取走已到达数据」语义一致，并把节流逻辑收敛进信号源内部。
+用 :func:`create_source` 按 :class:`~seeg_task.config.ExperimentConfig` 选择实现。
 """
 
 from __future__ import annotations
 
 import abc
 import threading
+import time
 from collections import deque
 
 import numpy as np
 
 
 class SignalSource(abc.ABC):
-    """采集接口：逐样本流式数据源（不持有窗口长度）。"""
+    """采集接口：read（取全部可用）/ flush（丢弃全部）/ close（关闭）。"""
 
     def __init__(self, n_channels: int) -> None:
         self.n_channels = n_channels
 
     @abc.abstractmethod
-    def read_sample(self, true_label: int | None = None) -> np.ndarray | None:
-        """读取**单列**新采样。
+    def read(self, true_label: int | None = None) -> np.ndarray | None:
+        """一次性获取当前**全部可用**数据。
 
         Args:
-            true_label: 当前试次的真实动作标签（模拟桩用于合成可分信号；真实采集忽略）。
+            true_label: 仅供模拟源生成可分信号；真实采集忽略。
 
         Returns:
-            形状为 ``(n_channels, 1)`` 的数组；若当前暂无新样本（如 LSL 非阻塞拉取为空）
-            则返回 ``None``。
+            形状 ``(n_channels, k)``（``k>=1``）的数组；当前暂无数据时返回 ``None``。
         """
         raise NotImplementedError
 
-    def close(self) -> None:  # noqa: B027 - 可选钩子，默认无操作
-        """释放底层资源（关闭设备 / 断开流）。默认无操作。"""
+    def flush(self) -> None:  # noqa: B027 - 默认无操作，带缓冲的源覆盖
+        """丢弃尚未消费的全部数据（如进入采集阶段前清掉积压）。"""
+
+    def close(self) -> None:  # noqa: B027 - 默认无操作
+        """关闭并释放底层资源（设备 / 流）。"""
 
 
-class SyntheticSource(SignalSource):
-    """模拟信号源。
+class _PacedSource(SignalSource):
+    """按采样率自计时的模拟源基类：``read`` 返回距上次读取以来应产生的样本数。"""
 
-    为每个类别预生成一组固定的“通道空间模式”，逐样本叠加噪声后输出，使得不同类别在统计上
-    可区分——这样解码器（即便是桩）和在线训练才能体现出正确率的变化趋势。
+    def __init__(self, n_channels: int, sampling_rate: float,
+                 rng: np.random.Generator | None = None) -> None:
+        super().__init__(n_channels)
+        self.sampling_rate = sampling_rate
+        self._rng = rng if rng is not None else np.random.default_rng()
+        self._t0 = time.monotonic()
+        self._emitted = 0
+
+    def _take(self) -> int:
+        """返回本次应产生的新样本数 k（>=0），并推进已产出计数。"""
+        due = int((time.monotonic() - self._t0) * self.sampling_rate)
+        k = max(0, due - self._emitted)
+        self._emitted += k
+        return k
+
+    def flush(self) -> None:
+        """重置计时基线：丢弃“应已积累但未读取”的样本。"""
+        self._t0 = time.monotonic()
+        self._emitted = 0
+
+
+class SyntheticSource(_PacedSource):
+    """带类别可分结构的模拟源。
+
+    每个类别一组固定的“通道空间模式”，叠加噪声后产出，使不同类别在统计上可区分——
+    便于观测解码/在线训练对正确率的提升。
     """
 
-    def __init__(
-        self,
-        n_channels: int,
-        n_classes: int,
-        noise_level: float = 1.0,
-        rng: np.random.Generator | None = None,
-    ) -> None:
-        super().__init__(n_channels)
+    def __init__(self, n_channels: int, n_classes: int, sampling_rate: float,
+                 noise_level: float = 1.0, rng: np.random.Generator | None = None) -> None:
+        super().__init__(n_channels, sampling_rate, rng)
         self.n_classes = n_classes
         self.noise_level = noise_level
-        self._rng = rng if rng is not None else np.random.default_rng()
-        # 每个类别一个固定的通道权重模式 (n_classes, n_channels)
         self._patterns = self._rng.standard_normal((n_classes, n_channels))
-        self._step = 0  # 采样步进计数（用于类别相关振荡相位）
+        self._phase = 0  # 振荡相位（按样本步进）
 
-    def read_sample(self, true_label: int | None = None) -> np.ndarray:
-        noise = self._rng.standard_normal((self.n_channels, 1)) * self.noise_level
+    def read(self, true_label: int | None = None) -> np.ndarray | None:
+        k = self._take()
+        if k == 0:
+            return None
+        noise = self._rng.standard_normal((self.n_channels, k)) * self.noise_level
         if true_label is None:
             return noise
-        self._step += 1
-        osc = np.sin(2.0 * np.pi * (0.01 * (1 + true_label)) * self._step)
-        pattern = self._patterns[true_label][:, None]  # (n_channels, 1)
-        return pattern * osc + noise
+        idx = np.arange(self._phase, self._phase + k)
+        self._phase += k
+        osc = np.sin(2.0 * np.pi * (0.01 * (1 + true_label)) * idx)  # (k,)
+        pattern = self._patterns[true_label][:, None]                 # (n_channels, 1)
+        return pattern * osc[None, :] + noise
 
 
-class DummySource(SignalSource):
-    """纯随机噪声的 dummy 数据源。
+class DummySource(_PacedSource):
+    """纯随机噪声模拟源（无类别结构）。
 
-    不含任何类别信息，仅用于无硬件时验证整条流程（界面、解码调用、缓冲、训练编排）。
-    注意：因数据与标签无关，在线训练不会提升正确率（正确率应在随机水平附近波动）。
+    仅用于无硬件时跑通流程；因数据与标签无关，在线训练不会提升正确率。
     """
 
-    def __init__(
-        self,
-        n_channels: int,
-        noise_level: float = 1.0,
-        rng: np.random.Generator | None = None,
-    ) -> None:
-        super().__init__(n_channels)
+    def __init__(self, n_channels: int, sampling_rate: float,
+                 noise_level: float = 1.0, rng: np.random.Generator | None = None) -> None:
+        super().__init__(n_channels, sampling_rate, rng)
         self.noise_level = noise_level
-        self._rng = rng if rng is not None else np.random.default_rng()
 
-    def read_sample(self, true_label: int | None = None) -> np.ndarray:
-        return self._rng.standard_normal((self.n_channels, 1)) * self.noise_level
+    def read(self, true_label: int | None = None) -> np.ndarray | None:
+        k = self._take()
+        if k == 0:
+            return None
+        return self._rng.standard_normal((self.n_channels, k)) * self.noise_level
 
 
 class LSLSource(SignalSource):
     """通过 Lab Streaming Layer 接收外部实时数据。
 
-    后台线程持续从 LSL inlet 拉取样本写入一个加锁的 FIFO 队列；:meth:`read_sample`
-    在主线程逐列弹出最早未消费的样本，从而把采集与试次循环解耦。窗口化由上层
-    :class:`~seeg_task.buffer.BlockBuffer` 负责，本类不持有窗口长度。
-
-    依赖 ``pylsl``（惰性导入：仅在实例化本类时才需要安装）。
+    后台线程持续从 LSL inlet 拉取样本写入一个加锁的 FIFO 队列；:meth:`read` 在主线程
+    一次性排空队列里现有的全部样本。依赖 ``pylsl``（惰性导入：仅实例化本类时才需要）。
     """
 
     def __init__(
@@ -148,8 +170,7 @@ class LSLSource(SignalSource):
               f"(type={info.type()}, ch={self._stream_channels}, srate={srate})")
 
         self._pull_timeout = pull_timeout
-        # FIFO 队列：后台线程入队、主线程逐列消费（maxlen 防止积压时无限增长）
-        self._q: deque = deque(maxlen=max_queue)
+        self._q: deque = deque(maxlen=max_queue)  # FIFO：后台入队、主线程排空
         self._lock = threading.Lock()
         self._running = True
         self._thread = threading.Thread(target=self._pull_loop, name="lsl-puller", daemon=True)
@@ -166,21 +187,26 @@ class LSLSource(SignalSource):
                 with self._lock:
                     self._q.extend(samples)
 
-    def read_sample(self, true_label: int | None = None) -> np.ndarray | None:
-        """从 FIFO 队列弹出一列最早未消费的样本，返回 ``(n_channels, 1)``；暂无新样本时返回 None。
+    def read(self, true_label: int | None = None) -> np.ndarray | None:
+        """一次性排空后台队列，返回 ``(n_channels, k)``；队列空时返回 None。
 
-        强制校验：收到的样本通道数必须等于配置 ``n_channels``，不一致直接抛 :class:`ValueError`。
+        强制校验通道数 == ``n_channels``，不一致直接抛 :class:`ValueError`。
         """
         with self._lock:
-            frame = self._q.popleft() if self._q else None
-        if frame is None:
-            return None
-        col = np.asarray(frame, dtype=np.float64).reshape(-1, 1)
-        if col.shape[0] != self.n_channels:
+            if not self._q:
+                return None
+            frames = list(self._q)
+            self._q.clear()
+        chunk = np.asarray(frames, dtype=np.float64).T  # (channels, k)
+        if chunk.shape[0] != self.n_channels:
             raise ValueError(
-                f"收到样本通道数 {col.shape[0]} 与配置 n_channels {self.n_channels} 不一致"
+                f"收到样本通道数 {chunk.shape[0]} 与配置 n_channels {self.n_channels} 不一致"
             )
-        return col
+        return chunk
+
+    def flush(self) -> None:
+        with self._lock:
+            self._q.clear()
 
     def close(self) -> None:
         self._running = False
@@ -193,10 +219,7 @@ class LSLSource(SignalSource):
 
 
 def create_source(config, rng: np.random.Generator | None = None) -> SignalSource:
-    """按 ``config.source_type`` 构造信号源。
-
-    支持 ``"lsl"`` / ``"dummy"`` / ``"synthetic"``（大小写不敏感）。
-    """
+    """按 ``config.source_type`` 构造信号源（``"lsl"`` / ``"dummy"`` / ``"synthetic"``）。"""
     kind = config.source_type.lower()
     if kind == "lsl":
         return LSLSource(
@@ -206,7 +229,7 @@ def create_source(config, rng: np.random.Generator | None = None) -> SignalSourc
             resolve_timeout=config.lsl_resolve_timeout,
         )
     if kind == "dummy":
-        return DummySource(config.n_channels, rng=rng)
+        return DummySource(config.n_channels, config.sampling_rate, rng=rng)
     if kind == "synthetic":
-        return SyntheticSource(config.n_channels, config.n_classes, rng=rng)
+        return SyntheticSource(config.n_channels, config.n_classes, config.sampling_rate, rng=rng)
     raise ValueError(f"未知 source_type: {config.source_type!r}（可选 lsl/dummy/synthetic）")

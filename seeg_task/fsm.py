@@ -74,23 +74,19 @@ class TrialFSM:
     # --- EXECUTE：流式采集 + 实时解码 -------------------------------------
     def _execute(self, action_index: int) -> None:
         cfg, ui = self.config, self.ui
+        self.source.flush()               # 丢弃 CUE/FIXATION 期积压，只采执行期数据
         self.buffer.reset_current_item()  # 进入 EXECUTE：清单次缓存
         counter = 0
-        fs = cfg.sampling_rate
-        run_clock = core.Clock()
         tick = core.Clock()
         first = True
         while counter < self.acquire_samples:
-            # 按采样率节流：本帧应已到达的样本数
-            target = self.acquire_samples if fs <= 0 else min(
-                self.acquire_samples, int(run_clock.getTime() * fs)
-            )
-            while counter < target:
-                sample = self.source.read_sample(true_label=action_index)
-                if sample is None:  # LSL 暂无新样本
-                    break
-                self.buffer.update_current_item(sample)
-                counter += 1
+            chunk = self.source.read(true_label=action_index)  # 一次性取走全部可用数据
+            if chunk is not None:
+                need = self.acquire_samples - counter
+                if chunk.shape[1] > need:        # 不超采，多余丢弃
+                    chunk = chunk[:, :need]
+                self.buffer.update_current_items(chunk)
+                counter += chunk.shape[1]
             # 定时实时解码 + 刷新正确率（至少一次）
             if first or tick.getTime() >= cfg.predict_interval:
                 first = False

@@ -41,9 +41,8 @@ def _configure_logging(level: str = "INFO", log_file: str | None = None) -> None
 def _selftest() -> int:
     """不打开窗口，验证核心数据/模型契约。返回 0 表示通过。"""
     _configure_logging("WARNING")  # 抑制自检中数百次 predict 的 INFO 日志
-    from .decoder import Decoder, LinearModel, extract_features
+    from .decoder import Decoder, LinearModel
     from .model_update import HistoryBuffer, ModelTrainer
-    from .signal_source import SyntheticSource
 
     cfg = ExperimentConfig()
     cfg.validate()
@@ -51,14 +50,18 @@ def _selftest() -> int:
     n_features = cfg.n_channels
     wlen = 256  # 自检用窗口长度（任意：特征对时间维做归约，与长度无关）
 
-    source = SyntheticSource(cfg.n_channels, cfg.n_classes, rng=rng)
     decoder = Decoder(LinearModel.random_init(cfg.n_classes, n_features, rng), cfg.n_classes)
     trainer = ModelTrainer(cfg.n_classes, n_features)
     buffer = HistoryBuffer(cfg.history_size)
 
+    # 直接合成类别可分窗口（不经信号源）：每通道功率随类别模式而变 -> 可被解码区分
+    patterns = rng.standard_normal((cfg.n_classes, cfg.n_channels))
+
     def window(label: int) -> np.ndarray:
-        """用逐列 read_sample 拼出一个 (n_channels, wlen) 窗口（模拟 BlockBuffer 的窗口化）。"""
-        return np.concatenate([source.read_sample(label) for _ in range(wlen)], axis=1)
+        idx = np.arange(wlen)
+        osc = np.sin(2.0 * np.pi * (0.01 * (1 + label)) * idx)            # (wlen,)
+        sig = patterns[label][:, None] * osc[None, :]                     # (n_channels, wlen)
+        return sig + rng.standard_normal((cfg.n_channels, wlen))
 
     # 1) predict 契约：形状 (n_classes,) 且概率和≈1
     x = window(0)
