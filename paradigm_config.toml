@@ -21,13 +21,12 @@ predict_interval = 0.5       # EXECUTE 采集期内每隔多少秒做一次 pred
 # 注：block 间休息无倒计时——先更新模型，再按空格进入下一 block
 
 # ---- 信号参数 --------------------------------------------------------------
-n_channels = 64              # 通道数
-sampling_rate = 1000.0       # 采样率 (Hz)
+n_channels = 16              # 通道数
+sampling_rate = 4096       # 采样率 (Hz)
 window_samples = 2000        # 单个解码窗口的采样点数 -> x.shape=(n_channels, window_samples)
 
-# ---- 采集 / 训练 -----------------------------------------------------------
+# ---- 采集 ------------------------------------------------------------------
 acquire_samples = 0          # EXECUTE 采集多少样本后结束；<=0 表示取 window_samples
-train_scope = "block"        # "block"（每 block 清空缓冲）| "cumulative"（跨 block 累积）
 
 # ---- 信号源选择 ------------------------------------------------------------
 source_type = "synthetic"    # "lsl" | "dummy" | "synthetic"

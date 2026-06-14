@@ -153,10 +153,7 @@ class BlockFSM:
 
     # --- block 起始动作 ---------------------------------------------------
     def _begin_block(self) -> None:
-        if self.config.train_scope == "block":
-            self.buffer.clean()            # 每 block 清空（仅用本 block 样本训练）
-        else:
-            self.buffer.reset_current_item()  # cumulative：保留 items，仅清单次窗口
+        self.buffer.clean()  # 每个 block 起始清空所有数据（仅用本 block 样本训练）
 
     def _block_order(self) -> list[int]:
         cfg = self.config

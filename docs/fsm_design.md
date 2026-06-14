@@ -105,16 +105,15 @@ stateDiagram-v2
 `BlockBuffer` 承担），可在实现时移除或保留作他用。
 
 ## 6. 关键设计决策（默认值，均可配置）
-1. **训练范围 = 按 block**：每个 block 起始 `buffer.clean()`，`TRAIN_REST` 只用**本 block** 样本训练。
-   如需跨 block 累积，改为不在 block 起始清 `items`（另设上限）。
+1. **训练范围 = 按 block**：每个 block 起始 `buffer.clean()` 清空所有数据，`TRAIN_REST` 只用**本 block** 样本训练。
 2. **EXECUTE 结束触发 = 采样点计数**：`counter` 计采集到的**样本数**，达到 `acquire_samples` 即结束执行；
    `acquire_samples` 默认取窗口长度 `window_samples`（N）。CUE/FIXATION 仍按时长 `cue_duration`/`fixation_duration`。
 3. 实时解码仅在 EXECUTE 期按 `predict_interval` 进行；正确率实时刷新。
 
 ## 7. 新增配置项（`paradigm_config.toml` / `ExperimentConfig`）
 - `acquire_samples: int = window_samples` —— EXECUTE 阶段采集多少样本后结束。
-- `train_scope: str = "block"` —— `"block"`（每 block 清空）或 `"cumulative"`（跨 block 累积）。
 - 复用：`cue_duration`、`fixation_duration`、`predict_interval`、`trials_per_block`、`n_blocks` 等。
+- 每个 block 起始 `BlockBuffer.clean()` 清空所有数据（仅用本 block 样本训练）。
 
 ## 8. 代码落地
 ```

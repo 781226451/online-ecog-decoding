@@ -44,9 +44,8 @@ class ExperimentConfig:
     iti_duration: float = 0.0        # trial 间隔（仅 trial 之间，最后一个 trial 后不做）；0=无间隔
     predict_interval: float = 0.5    # EXECUTE 采集期内每隔多少秒做一次 predict
 
-    # ---- 采集 / 训练 --------------------------------------------------------
+    # ---- 采集 --------------------------------------------------------------
     acquire_samples: int = 0         # EXECUTE 采集多少样本后结束；<=0 表示取 window_samples
-    train_scope: str = "block"       # "block"（每 block 清空缓冲）| "cumulative"（跨 block 累积）
 
     # ---- 信号参数 -----------------------------------------------------------
     n_channels: int = 64             # SEEG 通道数
@@ -107,8 +106,6 @@ class ExperimentConfig:
             raise ValueError("predict_interval 必须为正")
         if self.iti_duration < 0:
             raise ValueError("iti_duration 不能为负")
-        if self.train_scope not in ("block", "cumulative"):
-            raise ValueError("train_scope 仅支持 'block' 或 'cumulative'")
 
     # --- 从外部配置文件加载 --------------------------------------------------
     @classmethod
