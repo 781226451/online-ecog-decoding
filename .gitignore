@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 虚拟环境
+.venv/
+venv/
+
+# IDE / 编辑器
+.idea/
+.vscode/
+
+# Claude Code 会话目录
+.claude/
+
+# PsychoPy 运行产物
+*.log
+lastRun.log
