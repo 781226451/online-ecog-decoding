@@ -110,7 +110,8 @@ class BaseDecoder(abc.ABC):
         并发）。
 
         Args:
-            samples: ``[(x, label), ...]``，``x`` 形状 ``(n_channels, n_samples)``。
+            samples: ``[(x, label), ...]``，``x`` 形状 ``(n_channels, n_samples)``；
+                ``label`` 为整型类别标签，取值范围 ``0 .. N-1``（N 为类别数 ``n_classes``）。
 
         Returns:
             是否实际更新了模型；样本不足等情况可返回 ``False`` 表示本次跳过。
