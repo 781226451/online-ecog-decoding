@@ -10,8 +10,8 @@
         samples: [(x, label), ...]；返回是否实际更新了模型
 
 :class:`Decoder` 是其参考实现。要接入自定义解码器，只需继承 :class:`BaseDecoder` 并实现
-:meth:`predict` 与 :meth:`update`（以及 :meth:`from_config`），即可直接被 ``Experiment``
-使用，其余代码无需改动。
+:meth:`predict_inner` 与 :meth:`update`（以及 :meth:`from_config`），即可直接被 ``Experiment``
+使用，其余代码无需改动。对外的 :meth:`predict` 由基类实现并自动校验输出合法性。
 
 参考实现 :class:`Decoder` 内部持有 ``model`` 与一个 :class:`~seeg_task.model_update.ModelTrainer`：
 推理用 ``model.infer``；更新时由 trainer 重新拟合并在锁内**热替换** ``model``。``model`` 只需
@@ -53,6 +53,29 @@ def softmax(logits: np.ndarray) -> np.ndarray:
     return e / np.sum(e)
 
 
+def check_probs(probs: np.ndarray, n_classes: int, *, atol: float = 1e-6) -> None:
+    """校验 :meth:`BaseDecoder.predict` 的输出是否为合法概率分布。
+
+    检查三项：形状为 ``(n_classes,)``、每个元素都在 ``[0, 1]``、所有元素之和为 ``1``。
+    不满足则抛出 :class:`ValueError`。自定义解码器可在 ``predict`` 末尾调用本函数自检。
+
+    Args:
+        probs: predict 的返回值。
+        n_classes: 类别数 N。
+        atol: 概率和与 1 的允许误差。
+    """
+    probs = np.asarray(probs, dtype=np.float64)
+    if probs.shape != (n_classes,):
+        raise ValueError(f"predict 输出形状应为 ({n_classes},)，实际 {probs.shape}")
+    if not np.all((probs >= -atol) & (probs <= 1.0 + atol)):
+        raise ValueError(
+            f"predict 输出须在 [0, 1] 范围内，实际 min={probs.min():.4g}, max={probs.max():.4g}"
+        )
+    total = float(probs.sum())
+    if abs(total - 1.0) > atol:
+        raise ValueError(f"predict 输出的概率之和须为 1，实际 {total:.6f}")
+
+
 class LinearModel:
     """占位模型：线性分类器 (logits = W @ features + b)。
 
@@ -85,22 +108,34 @@ class BaseDecoder(abc.ABC):
     2. **模型更新** :meth:`update` —— 用历史样本在线更新自身模型。
 
     ``Experiment`` 仅依赖这两个方法（外加 :meth:`from_config` 构造）；自定义解码器继承
-    本类并实现它们即可接入范式，无需改动其它代码。约定实现应提供整型属性 ``n_classes``。
+    本类并实现 :meth:`predict_inner` 与 :meth:`update` 即可接入范式，无需改动其它代码。
+    约定实现应提供整型属性 ``n_classes``。
+
+    注意：对外的 :meth:`predict` 由基类实现（模板方法）——它调用子类的 :meth:`predict_inner`
+    并用 :func:`check_probs` **强制校验**输出为合法概率分布。子类只需实现 :meth:`predict_inner`，
+    无需自行校验。
     """
 
     n_classes: int
 
     @abc.abstractmethod
-    def predict(self, x: np.ndarray) -> np.ndarray:
-        """推理：对单个采集窗口解码。
+    def predict_inner(self, x: np.ndarray) -> np.ndarray:
+        """子类实现：对单个采集窗口解码。
 
         Args:
             x: 形状 ``(n_channels, n_samples)`` 的原始信号窗口。
 
         Returns:
-            形状 ``(n_classes,)`` 的概率分布（每个元素 >=0 且总和为 1）。
+            形状 ``(n_classes,)`` 的概率分布：每个元素都在 ``[0, 1]`` 且所有元素之和为 ``1``。
+            （合法性由基类 :meth:`predict` 统一校验，子类无需重复检查。）
         """
         raise NotImplementedError
+
+    def predict(self, x: np.ndarray) -> np.ndarray:
+        """推理（对外接口）：调用子类 :meth:`predict_inner` 并强制校验输出为合法概率分布。"""
+        probs = self.predict_inner(x)
+        check_probs(probs, self.n_classes)
+        return probs
 
     @abc.abstractmethod
     def update(self, samples: "list[tuple[np.ndarray, int]]") -> bool:
@@ -151,16 +186,12 @@ class Decoder(BaseDecoder):
         trainer = ModelTrainer(config.n_classes, config.n_channels)
         return cls(model, config.n_classes, trainer=trainer)
 
-    def predict(self, x: np.ndarray) -> np.ndarray:
-        """推理：对单个窗口解码，返回 ``(n_classes,)`` 概率分布。"""
+    def predict_inner(self, x: np.ndarray) -> np.ndarray:
+        """推理：对单个窗口解码，返回 ``(n_classes,)`` 概率分布（合法性由基类 predict 校验）。"""
         features = extract_features(x)
         with self._lock:
             logits = self._model.infer(features)
         probs = softmax(np.asarray(logits, dtype=np.float64))
-        if probs.shape != (self.n_classes,):
-            raise ValueError(
-                f"模型输出维度 {probs.shape} 与类别数 {self.n_classes} 不一致"
-            )
         pred = int(np.argmax(probs))
         logger.info("predict | x={} -> class={} p={:.3f}", tuple(x.shape), pred, float(probs[pred]))
         return probs
@@ -210,8 +241,8 @@ class DummyDecoder(BaseDecoder):
         rng = rng if rng is not None else np.random.default_rng(seed)
         return cls(config.n_classes, rng=rng)
 
-    def predict(self, x: np.ndarray) -> np.ndarray:
-        """推理：忽略输入，返回一个随机概率分布（和为 1）。"""
+    def predict_inner(self, x: np.ndarray) -> np.ndarray:
+        """推理：忽略输入，返回一个随机概率分布（合法性由基类 predict 校验）。"""
         probs = softmax(self._rng.standard_normal(self.n_classes))
         pred = int(np.argmax(probs))
         logger.info("predict(dummy) | x={} -> class={} p={:.3f}", tuple(x.shape), pred, float(probs[pred]))
