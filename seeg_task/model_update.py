@@ -1,10 +1,7 @@
 """在线模型更新模块。
 
-包含两部分：
-
-- :class:`HistoryBuffer`  : 环形缓冲，保存最近若干个 ``(x, label)`` 历史样本。
-- :class:`ModelTrainer`   : 用历史样本训练 / 更新模型，产出一个**新的** model 对象，
-  随后由 :meth:`~seeg_task.decoder.Decoder.swap_model` 热替换。
+:class:`ModelTrainer`：用历史样本训练 / 更新模型，产出一个**新的** model 对象，随后由
+:meth:`~seeg_task.decoder.Decoder.swap_model` 热替换。
 
 I/O 契约（保持稳定）::
 
@@ -19,38 +16,9 @@ I/O 契约（保持稳定）::
 
 from __future__ import annotations
 
-import threading
-
 import numpy as np
 
 from .decoder import LinearModel, extract_features
-
-
-class HistoryBuffer:
-    """容量受限的历史样本缓冲（先进先出截断），线程安全。"""
-
-    def __init__(self, capacity: int) -> None:
-        if capacity <= 0:
-            raise ValueError("capacity 必须为正")
-        self.capacity = capacity
-        self._items: list[tuple[np.ndarray, int]] = []
-        self._lock = threading.Lock()
-
-    def add(self, x: np.ndarray, label: int) -> None:
-        with self._lock:
-            self._items.append((np.asarray(x), int(label)))
-            if len(self._items) > self.capacity:
-                # 丢弃最旧的样本
-                self._items = self._items[-self.capacity :]
-
-    def recent(self, n: int) -> list[tuple[np.ndarray, int]]:
-        """返回最近 ``n`` 个样本的快照（拷贝，供训练线程安全读取）。"""
-        with self._lock:
-            return list(self._items[-n:])
-
-    def __len__(self) -> int:
-        with self._lock:
-            return len(self._items)
 
 
 class ModelTrainer:

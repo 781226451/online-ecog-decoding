@@ -66,10 +66,6 @@ class ExperimentConfig:
     # 传给该子类 from_config 的额外参数（dict），按需自定义。
     decoder_params: dict = field(default_factory=dict)
 
-    # ---- 在线模型更新 -------------------------------------------------------
-    history_size: int = 256          # HistoryBuffer 容量 (最多保留多少历史样本)
-    train_n_samples: int = 64        # 每个 block 后送入训练的历史样本数 n
-
     # ---- 显示 ---------------------------------------------------------------
     fullscreen: bool = False
     window_size: tuple[int, int] = (1280, 720)
@@ -106,17 +102,10 @@ class ExperimentConfig:
             raise ValueError("至少需要 2 个动作类别")
         if self.window_samples <= 0 or self.n_channels <= 0:
             raise ValueError("n_channels 与 window_samples 必须为正")
-        if self.train_n_samples <= 0:
-            raise ValueError("train_n_samples 必须为正")
         if self.predict_interval <= 0:
             raise ValueError("predict_interval 必须为正")
         if self.train_scope not in ("block", "cumulative"):
             raise ValueError("train_scope 仅支持 'block' 或 'cumulative'")
-        if self.train_n_samples > self.history_size:
-            print(
-                f"[config] 警告：train_n_samples({self.train_n_samples}) > "
-                f"history_size({self.history_size})，每次实际可用样本受限于 history_size"
-            )
 
     # --- 从外部配置文件加载 --------------------------------------------------
     @classmethod

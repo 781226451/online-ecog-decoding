@@ -41,8 +41,9 @@ def _configure_logging(level: str = "INFO", log_file: str | None = None) -> None
 def _selftest() -> int:
     """不打开窗口，验证核心数据/模型契约。返回 0 表示通过。"""
     _configure_logging("WARNING")  # 抑制自检中数百次 predict 的 INFO 日志
+    from .buffer import BlockBuffer
     from .decoder import Decoder, LinearModel
-    from .model_update import HistoryBuffer, ModelTrainer
+    from .model_update import ModelTrainer
 
     cfg = ExperimentConfig()
     cfg.validate()
@@ -52,7 +53,6 @@ def _selftest() -> int:
 
     decoder = Decoder(LinearModel.random_init(cfg.n_classes, n_features, rng), cfg.n_classes)
     trainer = ModelTrainer(cfg.n_classes, n_features)
-    buffer = HistoryBuffer(cfg.history_size)
 
     # 直接合成类别可分窗口（不经信号源）：每通道功率随类别模式而变 -> 可被解码区分
     patterns = rng.standard_normal((cfg.n_classes, cfg.n_channels))
@@ -72,19 +72,20 @@ def _selftest() -> int:
     assert np.all(probs >= 0)
     print(f"[ok] predict 输出形状 {probs.shape}，概率和 = {probs.sum():.6f}")
 
-    # 2) HistoryBuffer 容量截断
-    small = HistoryBuffer(capacity=3)
-    for i in range(5):
-        small.add(np.zeros((cfg.n_channels, wlen)), i % cfg.n_classes)
-    assert len(small) == 3, len(small)
-    assert len(small.recent(10)) == 3
-    print(f"[ok] HistoryBuffer 截断到容量 = {len(small)}")
+    # 2) BlockBuffer：批量推入 -> 存档 -> 清空
+    bb = BlockBuffer(cfg.n_channels, wlen)
+    bb.update_current_items(window(0)); bb.update_buffer(0)
+    bb.update_current_items(window(1)); bb.update_buffer(1)
+    assert len(bb) == 2 and bb.items[0][0].shape == (cfg.n_channels, wlen)
+    bb.clean(); assert len(bb) == 0
+    print("[ok] BlockBuffer 存档/清空正常")
 
     # 3) 训练产物可被 swap_model 接收且 predict 不抛错
-    for _ in range(cfg.train_n_samples):
+    samples = []
+    for _ in range(64):
         lab = int(rng.integers(cfg.n_classes))
-        buffer.add(window(lab), lab)
-    new_model = trainer.train(buffer.recent(cfg.train_n_samples))
+        samples.append((window(lab), lab))
+    new_model = trainer.train(samples)
     assert isinstance(new_model, LinearModel), type(new_model)
     decoder.swap_model(new_model)
     probs2 = decoder.predict(window(0))

@@ -44,10 +44,6 @@ lsl_resolve_timeout = 5.0        # 解析 LSL 流的超时（秒）
 # decoder_class = "seeg_task.decoder.Decoder"
 # 传给解码器 from_config 的额外参数见文件末尾可选的 [decoder_params] 表。
 
-# ---- 在线模型更新 ----------------------------------------------------------
-history_size = 256           # 历史样本缓冲容量（最多保留多少 (x,label) 样本）
-train_n_samples = 64         # 每个 block 后送入训练的历史样本数 n（不应大于 history_size）
-
 # ---- 显示 ------------------------------------------------------------------
 fullscreen = false
 window_size = [1280, 720]
