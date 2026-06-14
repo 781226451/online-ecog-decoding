@@ -6,4 +6,5 @@ dependencies = [
     "psychopy==2026.1.3",
     "numpy>=2.0",
     "imageio>=2.30",
+    "pylsl>=1.16",
 ]

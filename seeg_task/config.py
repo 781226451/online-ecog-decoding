@@ -53,6 +53,13 @@ class ExperimentConfig:
     sampling_rate: float = 1000.0    # 采样率 (Hz)
     window_samples: int = 2000       # 单个解码窗口的采样点数 -> x.shape=(n_channels, window_samples)
 
+    # ---- 信号源选择 ---------------------------------------------------------
+    source_type: str = "synthetic"   # "lsl" | "dummy" | "synthetic"
+    # LSL（仅 source_type == "lsl" 时使用）
+    lsl_stream_name: str | None = None   # 按流名解析；为 None 时改用 lsl_stream_type
+    lsl_stream_type: str = "EEG"         # 按流类型解析（如 'EEG' / 'sEEG'）
+    lsl_resolve_timeout: float = 5.0     # 解析流的超时（秒）
+
     # ---- 在线模型更新 -------------------------------------------------------
     history_size: int = 256          # HistoryBuffer 容量 (最多保留多少历史样本)
     train_n_samples: int = 64        # 每个 block 后送入训练的历史样本数 n

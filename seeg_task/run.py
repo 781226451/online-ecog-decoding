@@ -89,6 +89,12 @@ def main() -> int:
     parser.add_argument("--fullscreen", action="store_true", help="全屏运行")
     parser.add_argument("--blocks", type=int, default=None, help="覆盖 block 数")
     parser.add_argument("--trials", type=int, default=None, help="覆盖每 block 试次数")
+    parser.add_argument(
+        "--source", choices=["synthetic", "dummy", "lsl"], default=None,
+        help="信号源：synthetic(默认,可分模拟) / dummy(纯随机) / lsl(外部实时流)",
+    )
+    parser.add_argument("--lsl-name", default=None, help="LSL 流名（source=lsl 时）")
+    parser.add_argument("--lsl-type", default=None, help="LSL 流类型，默认 EEG（source=lsl 时）")
     args = parser.parse_args()
 
     if args.selftest:
@@ -101,6 +107,12 @@ def main() -> int:
         cfg.n_blocks = args.blocks
     if args.trials is not None:
         cfg.trials_per_block = args.trials
+    if args.source is not None:
+        cfg.source_type = args.source
+    if args.lsl_name is not None:
+        cfg.lsl_stream_name = args.lsl_name
+    if args.lsl_type is not None:
+        cfg.lsl_stream_type = args.lsl_type
 
     from .experiment import Experiment
 

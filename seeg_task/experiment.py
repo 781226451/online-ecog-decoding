@@ -10,7 +10,7 @@ from psychopy import core
 from .config import ExperimentConfig
 from .decoder import Decoder, LinearModel
 from .model_update import HistoryBuffer, ModelTrainer
-from .signal_source import SignalSource, SyntheticSource
+from .signal_source import SignalSource, create_source
 from .ui import ExperimentUI
 
 
@@ -35,9 +35,7 @@ class Experiment:
         self.rng = np.random.default_rng(cfg.random_seed)
         n_features = cfg.n_channels  # extract_features 输出长度 = 通道数
 
-        self.source = source or SyntheticSource(
-            cfg.n_channels, cfg.window_samples, cfg.n_classes, rng=self.rng
-        )
+        self.source = source or create_source(cfg, rng=self.rng)
         self.decoder = decoder or Decoder(
             LinearModel.random_init(cfg.n_classes, n_features, self.rng), cfg.n_classes
         )
