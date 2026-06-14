@@ -101,7 +101,7 @@ class ExperimentUI:
         # 全屏提示用文字
         self.center_text = self._text(text="", height=0.05, pos=(0, 0), wrapWidth=self._half_w * 1.6)
         self.rest_title = self._text(text="", height=0.07, pos=(0, 0.10), bold=True)
-        self.rest_count = self._text(text="", height=0.06, pos=(0, -0.12))
+        self.rest_prompt = self._text(text="", height=0.05, pos=(0, -0.12))
 
     # --- 统计更新 -----------------------------------------------------------
     def record_result(self, predicted: int, true_label: int, probs: np.ndarray | None = None) -> bool:
@@ -144,12 +144,13 @@ class ExperimentUI:
         self.fixation.draw()
         self.draw_right_panel()
 
-    def draw_rest(self, remaining: float) -> None:
-        # 休息界面不显示任何模型训练相关文字，仅提示休息与倒计时
+    def draw_rest(self, prompt: str = "") -> None:
+        # 休息界面：标题“请休息” + 可选第二行提示（不显示任何模型训练文字）
         self.rest_title.text = "请休息"
-        self.rest_count.text = f"{remaining:0.0f} s"
         self.rest_title.draw()
-        self.rest_count.draw()
+        if prompt:
+            self.rest_prompt.text = prompt
+            self.rest_prompt.draw()
 
     def draw_cue_text(self, label: str) -> None:
         """CUE 阶段：全屏显示「当前动作为：{label}」。"""

@@ -41,7 +41,6 @@ class ExperimentConfig:
     # ---- 各阶段时长（秒）----------------------------------------------------
     cue_duration: float = 2.0        # CUE：全屏「当前动作为：{}」提示时长
     fixation_duration: float = 1.0   # FIXATION：盯点（白色十字）时长
-    rest_duration: float = 15.0      # block 间休息（期间后台训练）
     predict_interval: float = 0.5    # EXECUTE 采集期内每隔多少秒做一次 predict
 
     # ---- 采集 / 训练 --------------------------------------------------------

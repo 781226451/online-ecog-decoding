@@ -162,9 +162,9 @@ class BlockFSM:
         self.rng.shuffle(seq)
         return seq.tolist()
 
-    # --- 休息 + 后台训练 --------------------------------------------------
+    # --- 休息：先更新模型，再按空格进入下一 block --------------------------
     def _rest_and_train(self) -> None:
-        ui, cfg = self.ui, self.config
+        ui = self.ui
         samples = list(self.buffer.items)  # 本 block（或累积）样本快照
         result: dict[str, bool] = {}
         error: dict[str, BaseException] = {}
@@ -178,21 +178,19 @@ class BlockFSM:
         thread = threading.Thread(target=worker, name="model-trainer", daemon=True)
         thread.start()
 
-        applied = False
-        clock = core.Clock()
-        while clock.getTime() < cfg.rest_duration:
-            remaining = cfg.rest_duration - clock.getTime()
-            if not applied and not thread.is_alive():
-                self._log_update_result(result, error)
-                applied = True
-            ui.draw_rest(remaining)
+        # 1) 模型更新进行中：显示“请休息”，等待训练完成（保持可 Esc 退出）
+        while thread.is_alive():
+            ui.draw_rest()
             ui.flip()
             if ui.quit_requested():
                 raise QuitExperiment
+        self._log_update_result(result, error)
 
-        if not applied:  # 极少见：休息结束仍未训完，阻塞等待
-            thread.join()
-            self._log_update_result(result, error)
+        # 2) 更新完成：提示按空格进入下一 block（无倒计时，由患者自行决定）
+        ui.draw_rest("按 空格键 开始下一个 block")
+        ui.flip()
+        if "escape" in ui.wait_keys(keys=["space", "escape"]):
+            raise QuitExperiment
 
     def _log_update_result(self, result: dict, error: dict) -> None:
         if "err" in error:

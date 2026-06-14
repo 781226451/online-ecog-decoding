@@ -92,13 +92,13 @@ sequenceDiagram
   E->>H: add(x, label)
 
   Note over E,D: block 结束 → 休息期
-  E->>H: recent(n)
-  H-->>E: samples
-  E-)D: update(samples)  # 后台线程：内部训练 + 锁内热替换
-  loop 休息倒计时
-    E->>U: draw_rest(remaining, status)
+  E-)D: update(buffer.items)  # 后台线程：内部训练 + 锁内热替换
+  loop 训练进行中
+    E->>U: draw_rest()  # 仅“请休息”
   end
-  D--)E: 返回 updated(bool) → 状态文案
+  D--)E: 训练完成
+  E->>U: draw_rest("按空格开始下一 block")
+  E->>U: wait_keys(space/esc)  # 无倒计时，等患者按键
 ```
 
 ## 4. 并发模型

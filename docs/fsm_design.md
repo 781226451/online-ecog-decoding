@@ -63,7 +63,7 @@ stateDiagram-v2
 | 状态 | 含义 | 动作 |
 |------|------|------|
 | `TRIAL` | 跑当前 block 的一个 trial | 运行一轮 trial FSM；trial 计数 +1 |
-| `TRAIN_REST` | block 末休息 + 训练 | entry：后台线程 `decoder.update(buffer.items)`；显示“请休息”+倒计时（不显示训练文字） |
+| `TRAIN_REST` | block 末休息 + 训练 | entry：后台线程 `decoder.update(buffer.items)`；显示“请休息”，更新完成后提示“按空格开始下一 block”并等待按键（无倒计时） |
 | `FINISH` | 全部 block 结束（终态） | 显示总体正确率，等待退出 |
 
 | 转移 | 触发 | 转移动作 |
@@ -114,7 +114,7 @@ stateDiagram-v2
 ## 7. 新增配置项（`paradigm_config.toml` / `ExperimentConfig`）
 - `acquire_samples: int = window_samples` —— EXECUTE 阶段采集多少样本后结束。
 - `train_scope: str = "block"` —— `"block"`（每 block 清空）或 `"cumulative"`（跨 block 累积）。
-- 复用：`cue_duration`、`fixation_duration`、`predict_interval`、`rest_duration`、`trials_per_block`、`n_blocks` 等。
+- 复用：`cue_duration`、`fixation_duration`、`predict_interval`、`trials_per_block`、`n_blocks` 等。
 
 ## 8. 代码落地
 ```
