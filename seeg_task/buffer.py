@@ -69,16 +69,16 @@ class BlockBuffer:
             label: 整型类别标签（取值范围 ``0 .. N-1``）。存档为 ``(current_item, label)``。
         """
         self.items.append((self.current_item, int(label)))
-        self._reset_window()  # 仅清空 current_item（保留已存档 items），避免跨段残留
+        self.reset_current_item()  # 仅清空 current_item（保留已存档 items），避免跨段残留
 
-    def _reset_window(self) -> None:
+    def reset_current_item(self) -> None:
         """把滑动窗口 ``current_item`` 重置为全 0（不影响 :attr:`items`）。"""
         self._buf[:] = 0
         self._pos = 0
 
     def clean(self) -> None:
         """清除所有数据：``current_item`` 重置为全 0，并清空已存档的 :attr:`items`。"""
-        self._reset_window()
+        self.reset_current_item()
         self.items.clear()
 
     def __len__(self) -> int:

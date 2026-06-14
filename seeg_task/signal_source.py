@@ -40,6 +40,19 @@ class SignalSource(abc.ABC):
         """
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def read_sample(self, true_label: int | None = None) -> np.ndarray | None:
+        """读取**单列**新采样（供 FSM 的 EXECUTE 流式采集逐列推入缓冲）。
+
+        Args:
+            true_label: 当前试次的真实动作标签（模拟桩用于合成可分信号；真实采集忽略）。
+
+        Returns:
+            形状为 ``(n_channels, 1)`` 的数组；若当前暂无新样本（如 LSL 非阻塞拉取为空）
+            则返回 ``None``。
+        """
+        raise NotImplementedError
+
     def close(self) -> None:  # noqa: B027 - 可选钩子，默认无操作
         """释放底层资源（关闭设备 / 断开流）。默认无操作。"""
 
@@ -65,6 +78,7 @@ class SyntheticSource(SignalSource):
         self._rng = rng if rng is not None else np.random.default_rng()
         # 每个类别一个固定的通道权重模式 (n_classes, n_channels)
         self._patterns = self._rng.standard_normal((n_classes, n_channels))
+        self._step = 0  # read_sample 的采样步进计数（用于类别相关振荡相位）
 
     def read_window(self, true_label: int | None = None) -> np.ndarray:
         noise = self._rng.standard_normal((self.n_channels, self.window_samples)) * self.noise_level
@@ -77,6 +91,15 @@ class SyntheticSource(SignalSource):
         pattern = self._patterns[true_label][:, None]  # (n_channels, 1)
         signal = pattern * base[None, :]  # (n_channels, window_samples)
         return signal + noise
+
+    def read_sample(self, true_label: int | None = None) -> np.ndarray:
+        noise = self._rng.standard_normal((self.n_channels, 1)) * self.noise_level
+        if true_label is None:
+            return noise
+        self._step += 1
+        osc = np.sin(2.0 * np.pi * (0.01 * (1 + true_label)) * self._step)
+        pattern = self._patterns[true_label][:, None]  # (n_channels, 1)
+        return pattern * osc + noise
 
 
 class DummySource(SignalSource):
@@ -99,6 +122,9 @@ class DummySource(SignalSource):
 
     def read_window(self, true_label: int | None = None) -> np.ndarray:
         return self._rng.standard_normal((self.n_channels, self.window_samples)) * self.noise_level
+
+    def read_sample(self, true_label: int | None = None) -> np.ndarray:
+        return self._rng.standard_normal((self.n_channels, 1)) * self.noise_level
 
 
 class LSLSource(SignalSource):
@@ -150,8 +176,9 @@ class LSLSource(SignalSource):
               f"(type={info.type()}, ch={self._stream_channels}, srate={srate})")
 
         self._pull_timeout = pull_timeout
-        # 环形缓冲：每个元素是一帧（长度=流通道数）的样本向量。
+        # 环形缓冲（供 read_window 取最近整窗）+ FIFO 队列（供 read_sample 逐列消费）
         self._buf: deque = deque(maxlen=window_samples)
+        self._q: deque = deque(maxlen=max(window_samples * 4, 1024))
         self._lock = threading.Lock()
         self._running = True
         self._thread = threading.Thread(target=self._pull_loop, name="lsl-puller", daemon=True)
@@ -166,7 +193,16 @@ class LSLSource(SignalSource):
                 continue
             if samples:
                 with self._lock:
-                    self._buf.extend(samples)
+                    self._buf.extend(samples)   # 整窗用
+                    self._q.extend(samples)     # 逐列用
+
+    def _align(self, frame) -> np.ndarray:
+        """把一帧样本（长度=流通道数）对齐为 ``(n_channels, 1)``（截断/补零）。"""
+        col = np.zeros((self.n_channels, 1), dtype=np.float64)
+        arr = np.asarray(frame, dtype=np.float64)
+        ch = min(self.n_channels, arr.shape[0])
+        col[:ch, 0] = arr[:ch]
+        return col
 
     def read_window(self, true_label: int | None = None) -> np.ndarray:
         with self._lock:
@@ -179,6 +215,12 @@ class LSLSource(SignalSource):
             ch = min(self.n_channels, arr.shape[1])     # 通道对齐（截断/补零）
             out[-arr.shape[0]:, :ch] = arr[:, :ch]      # 右对齐：尾部为最新样本
         return out.T  # (n_channels, window_samples)
+
+    def read_sample(self, true_label: int | None = None) -> np.ndarray | None:
+        """从 FIFO 队列弹出一列最早未消费的样本；暂无新样本时返回 None。"""
+        with self._lock:
+            frame = self._q.popleft() if self._q else None
+        return None if frame is None else self._align(frame)
 
     def close(self) -> None:
         self._running = False
