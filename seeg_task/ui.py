@@ -234,6 +234,11 @@ class ExperimentUI:
         )
         self.acc_value = self._text(text="--%", height=0.28, pos=(self._right_x, -0.08), bold=True)
 
+        # 全屏 CUE 文字 与 全屏盯点白色十字（trial 级 FSM 使用）
+        self.cue_text = self._text(text="", height=0.09, pos=(0, 0), bold=True,
+                                   wrapWidth=self._half_w * 1.8)
+        self.fixation_cross = self._text(text="+", height=0.22, pos=(0, 0), color=(1.0, 1.0, 1.0))
+
         # 全屏提示用文字
         self.center_text = self._text(text="", height=0.05, pos=(0, 0), wrapWidth=self._half_w * 1.6)
         self.rest_title = self._text(text="", height=0.07, pos=(0, 0.10), bold=True)
@@ -317,21 +322,21 @@ class ExperimentUI:
         self.fixation.draw()
         self.draw_right_panel()
 
-    def draw_feedback(self, action_index: int, correct: bool, predicted_index: int) -> None:
-        # 左侧不显示任何解码结果文字，仅保留动作名 + 媒体 + 右侧正确率
-        self.current_action = action_index
-        self.action_title.text = self.config.actions[action_index].label
-        self.draw_divider()
-        self.action_title.draw()
-        self.draw_left_media(action_index)
-        self.draw_right_panel()
-
     def draw_rest(self, remaining: float) -> None:
         # 休息界面不显示任何模型训练相关文字，仅提示休息与倒计时
         self.rest_title.text = "请休息"
         self.rest_count.text = f"{remaining:0.0f} s"
         self.rest_title.draw()
         self.rest_count.draw()
+
+    def draw_cue_text(self, label: str) -> None:
+        """CUE 阶段：全屏显示「当前动作为：{label}」。"""
+        self.cue_text.text = f"当前动作为：{label}"
+        self.cue_text.draw()
+
+    def draw_fixation_cross(self) -> None:
+        """FIXATION 阶段：全屏居中白色十字。"""
+        self.fixation_cross.draw()
 
     def draw_message(self, text: str) -> None:
         self.center_text.text = text

@@ -46,11 +46,14 @@ class ExperimentConfig:
     trials_per_block: int = 8
 
     # ---- 各阶段时长（秒）----------------------------------------------------
-    fixation_duration: float = 1.0   # 注视点 / 准备
-    cue_duration: float = 4.0        # 动作执行/想象 + 采集 + 解码
-    feedback_duration: float = 1.0   # 结果反馈停留
+    cue_duration: float = 2.0        # CUE：全屏「当前动作为：{}」提示时长
+    fixation_duration: float = 1.0   # FIXATION：盯点（白色十字）时长
     rest_duration: float = 15.0      # block 间休息（期间后台训练）
-    predict_interval: float = 0.5    # cue 采集期内每隔多少秒在主线程做一次 predict
+    predict_interval: float = 0.5    # EXECUTE 采集期内每隔多少秒做一次 predict
+
+    # ---- 采集 / 训练 --------------------------------------------------------
+    acquire_samples: int = 0         # EXECUTE 采集多少样本后结束；<=0 表示取 window_samples
+    train_scope: str = "block"       # "block"（每 block 清空缓冲）| "cumulative"（跨 block 累积）
 
     # ---- 信号参数 -----------------------------------------------------------
     n_channels: int = 64             # SEEG 通道数
@@ -106,6 +109,11 @@ class ExperimentConfig:
     def action_labels(self) -> list[str]:
         return [a.label for a in self.actions]
 
+    @property
+    def effective_acquire_samples(self) -> int:
+        """EXECUTE 实际采集样本数：``acquire_samples`` 为正则用之，否则取 ``window_samples``。"""
+        return self.acquire_samples if self.acquire_samples > 0 else self.window_samples
+
     def validate(self) -> None:
         if self.n_classes < 2:
             raise ValueError("至少需要 2 个动作类别")
@@ -115,6 +123,8 @@ class ExperimentConfig:
             raise ValueError("train_n_samples 必须为正")
         if self.predict_interval <= 0:
             raise ValueError("predict_interval 必须为正")
+        if self.train_scope not in ("block", "cumulative"):
+            raise ValueError("train_scope 仅支持 'block' 或 'cumulative'")
         if self.train_n_samples > self.history_size:
             print(
                 f"[config] 警告：train_n_samples({self.train_n_samples}) > "

@@ -14,16 +14,19 @@ n_blocks = 4                 # block 数
 trials_per_block = 8         # 每个 block 的试次数
 
 # ---- 各阶段时长（秒）-------------------------------------------------------
-fixation_duration = 1.0      # 注视点 / 准备
-cue_duration = 4.0           # 动作执行/想象 + 采集 + 解码
-feedback_duration = 1.0      # 结果反馈停留
+cue_duration = 2.0           # CUE：全屏「当前动作为：{}」提示时长
+fixation_duration = 1.0      # FIXATION：盯点（白色十字）时长
 rest_duration = 15.0         # block 间休息（期间后台训练）
-predict_interval = 0.5       # cue 采集期内每隔多少秒在主线程做一次 predict（实时滚动解码）
+predict_interval = 0.5       # EXECUTE 采集期内每隔多少秒做一次 predict（实时滚动解码）
 
 # ---- 信号参数 --------------------------------------------------------------
 n_channels = 64              # 通道数
 sampling_rate = 1000.0       # 采样率 (Hz)
 window_samples = 2000        # 单个解码窗口的采样点数 -> x.shape=(n_channels, window_samples)
+
+# ---- 采集 / 训练 -----------------------------------------------------------
+acquire_samples = 0          # EXECUTE 采集多少样本后结束；<=0 表示取 window_samples
+train_scope = "block"        # "block"（每 block 清空缓冲）| "cumulative"（跨 block 累积）
 
 # ---- 信号源选择 ------------------------------------------------------------
 source_type = "synthetic"    # "lsl" | "dummy" | "synthetic"
