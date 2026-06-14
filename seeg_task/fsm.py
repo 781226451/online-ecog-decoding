@@ -129,13 +129,19 @@ class BlockFSM:
         while True:
             if state == BlockState.TRIAL:
                 if trial_idx < cfg.trials_per_block:
-                    self.trial.run(order[trial_idx])
+                    action_index = order[trial_idx]
+                    label = cfg.actions[action_index].label
+                    # 绑定上下文：后续日志（含 EXECUTE 期 predict）都带 blk/trial/act
+                    with logger.contextualize(block=block + 1, trial=trial_idx + 1, action=label):
+                        logger.info("trial 开始")
+                        self.trial.run(action_index)
                     trial_idx += 1
                 else:
                     state = BlockState.TRAIN_REST
             elif state == BlockState.TRAIN_REST:
                 if block < cfg.n_blocks - 1:
-                    self._rest_and_train()
+                    with logger.contextualize(block=block + 1, trial="-", action="train"):
+                        self._rest_and_train()
                     block += 1
                     self._begin_block()
                     order = self._block_order()
@@ -198,4 +204,5 @@ class BlockFSM:
         elif result.get("updated"):
             logger.info("模型已更新（本 block 样本 {} 条）", len(self.buffer.items))
         else:
-            logger.info("样本不足，本次跳过更新")
+            # update 返回 False：可能是解码器不训练（如 DummyDecoder）或样本不足
+            logger.info("本次未更新模型（解码器跳过；样本 {} 条）", len(self.buffer.items))

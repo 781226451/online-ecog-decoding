@@ -17,13 +17,25 @@ from loguru import logger
 from .config import ExperimentConfig
 
 
+_LOG_FORMAT = (
+    "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <7} | "
+    "blk={extra[block]} trial={extra[trial]} act={extra[action]} | "
+    "{name}:{function}:{line} - {message}"
+)
+
+
 def _configure_logging(level: str = "INFO", log_file: str | None = None) -> None:
-    """配置 Loguru：控制台输出，可选同时写入文件（按级别过滤）。"""
+    """配置 Loguru：控制台输出，可选同时写入文件（按级别过滤）。
+
+    日志格式带上下文字段 ``blk/trial/act``（block id、trial id、当前动作名）；
+    无上下文时显示默认占位 ``-``（见 :meth:`~seeg_task.fsm.BlockFSM.run` 的 contextualize）。
+    """
     level = str(level).upper()
     logger.remove()  # 移除 Loguru 默认 handler，避免重复输出
-    logger.add(sys.stderr, level=level)
+    logger.configure(extra={"block": "-", "trial": "-", "action": "-"})  # 上下文默认值
+    logger.add(sys.stderr, level=level, format=_LOG_FORMAT)
     if log_file:
-        logger.add(log_file, level=level, encoding="utf-8")
+        logger.add(log_file, level=level, format=_LOG_FORMAT, encoding="utf-8")
 
 
 def _selftest() -> int:
