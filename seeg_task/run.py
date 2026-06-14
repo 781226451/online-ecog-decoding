@@ -37,15 +37,20 @@ def _selftest() -> int:
     cfg.validate()
     rng = np.random.default_rng(0)
     n_features = cfg.n_channels
+    wlen = 256  # 自检用窗口长度（任意：特征对时间维做归约，与长度无关）
 
-    source = SyntheticSource(cfg.n_channels, cfg.window_samples, cfg.n_classes, rng=rng)
+    source = SyntheticSource(cfg.n_channels, cfg.n_classes, rng=rng)
     decoder = Decoder(LinearModel.random_init(cfg.n_classes, n_features, rng), cfg.n_classes)
     trainer = ModelTrainer(cfg.n_classes, n_features)
     buffer = HistoryBuffer(cfg.history_size)
 
+    def window(label: int) -> np.ndarray:
+        """用逐列 read_sample 拼出一个 (n_channels, wlen) 窗口（模拟 BlockBuffer 的窗口化）。"""
+        return np.concatenate([source.read_sample(label) for _ in range(wlen)], axis=1)
+
     # 1) predict 契约：形状 (n_classes,) 且概率和≈1
-    x = source.read_window(true_label=0)
-    assert x.shape == (cfg.n_channels, cfg.window_samples), x.shape
+    x = window(0)
+    assert x.shape == (cfg.n_channels, wlen), x.shape
     probs = decoder.predict(x)
     assert probs.shape == (cfg.n_classes,), probs.shape
     assert abs(float(probs.sum()) - 1.0) < 1e-6, probs.sum()
@@ -55,21 +60,19 @@ def _selftest() -> int:
     # 2) HistoryBuffer 容量截断
     small = HistoryBuffer(capacity=3)
     for i in range(5):
-        small.add(np.zeros((cfg.n_channels, cfg.window_samples)), i % cfg.n_classes)
+        small.add(np.zeros((cfg.n_channels, wlen)), i % cfg.n_classes)
     assert len(small) == 3, len(small)
     assert len(small.recent(10)) == 3
     print(f"[ok] HistoryBuffer 截断到容量 = {len(small)}")
 
     # 3) 训练产物可被 swap_model 接收且 predict 不抛错
-    labels = []
     for _ in range(cfg.train_n_samples):
         lab = int(rng.integers(cfg.n_classes))
-        buffer.add(source.read_window(true_label=lab), lab)
-        labels.append(lab)
+        buffer.add(window(lab), lab)
     new_model = trainer.train(buffer.recent(cfg.train_n_samples))
     assert isinstance(new_model, LinearModel), type(new_model)
     decoder.swap_model(new_model)
-    probs2 = decoder.predict(source.read_window(true_label=0))
+    probs2 = decoder.predict(window(0))
     assert probs2.shape == (cfg.n_classes,)
     print("[ok] ModelTrainer 产物可热替换，predict 正常")
 
@@ -78,7 +81,7 @@ def _selftest() -> int:
         hit = 0
         for _ in range(n):
             lab = int(rng.integers(cfg.n_classes))
-            if int(np.argmax(dec.predict(source.read_window(true_label=lab)))) == lab:
+            if int(np.argmax(dec.predict(window(lab)))) == lab:
                 hit += 1
         return hit / n
 
