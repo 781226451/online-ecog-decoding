@@ -50,6 +50,7 @@ class ExperimentConfig:
     cue_duration: float = 4.0        # 动作执行/想象 + 采集 + 解码
     feedback_duration: float = 1.0   # 结果反馈停留
     rest_duration: float = 15.0      # block 间休息（期间后台训练）
+    predict_interval: float = 0.5    # cue 采集期内每隔多少秒在主线程做一次 predict
 
     # ---- 信号参数 -----------------------------------------------------------
     n_channels: int = 64             # SEEG 通道数
@@ -111,6 +112,8 @@ class ExperimentConfig:
             raise ValueError("n_channels 与 window_samples 必须为正")
         if self.train_n_samples <= 0:
             raise ValueError("train_n_samples 必须为正")
+        if self.predict_interval <= 0:
+            raise ValueError("predict_interval 必须为正")
         if self.train_n_samples > self.history_size:
             print(
                 f"[config] 警告：train_n_samples({self.train_n_samples}) > "
