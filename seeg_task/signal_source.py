@@ -10,9 +10,10 @@
 信号源不持有窗口长度。三种实现：
 
 - :class:`LSLSource`       : 通过 Lab Streaming Layer (pylsl) 接收**外部实时数据**（后台线程入队，read 排空队列）。
-- :class:`DummySource`     : 纯随机噪声模拟源（无类别结构）。
-- :class:`SyntheticSource` : 带类别可分结构的模拟源，便于观测在线训练对正确率的提升。
+- :class:`DummySource`     : 纯随机噪声模拟源。
+- :class:`SyntheticSource` : 每通道一个频率的正弦 + 噪声的结构化模拟源。
 
+数据**不与动作类别挂钩**——信号源只负责产数，不需要也不知道当前 trial 的标签。
 模拟源按 ``sampling_rate`` **自计时**产数：``read()`` 返回「距上次读取以来按采样率应产生的样本」，
 从而与真实流「取走已到达数据」语义一致，并把节流逻辑收敛进信号源内部。
 用 :func:`create_source` 按 :class:`~seeg_task.config.ExperimentConfig` 选择实现。
@@ -35,11 +36,8 @@ class SignalSource(abc.ABC):
         self.n_channels = n_channels
 
     @abc.abstractmethod
-    def read(self, true_label: int | None = None) -> np.ndarray | None:
+    def read(self) -> np.ndarray | None:
         """一次性获取当前**全部可用**数据。
-
-        Args:
-            true_label: 仅供模拟源生成可分信号；真实采集忽略。
 
         Returns:
             形状 ``(n_channels, k)``（``k>=1``）的数组；当前暂无数据时返回 ``None``。
@@ -78,32 +76,23 @@ class _PacedSource(SignalSource):
 
 
 class SyntheticSource(_PacedSource):
-    """带类别可分结构的模拟源。
+    """结构化模拟源：每通道一个固定频率的正弦 + 噪声（与动作类别无关）。"""
 
-    每个类别一组固定的“通道空间模式”，叠加噪声后产出，使不同类别在统计上可区分——
-    便于观测解码/在线训练对正确率的提升。
-    """
-
-    def __init__(self, n_channels: int, n_classes: int, sampling_rate: float,
+    def __init__(self, n_channels: int, sampling_rate: float,
                  noise_level: float = 1.0, rng: np.random.Generator | None = None) -> None:
         super().__init__(n_channels, sampling_rate, rng)
-        self.n_classes = n_classes
         self.noise_level = noise_level
-        self._patterns = self._rng.standard_normal((n_classes, n_channels))
-        self._phase = 0  # 振荡相位（按样本步进）
+        self._freqs = self._rng.uniform(8.0, 30.0, size=n_channels)  # 每通道一个频率 (Hz)
+        self._phase = 0  # 已产出样本数（用于相位连续）
 
-    def read(self, true_label: int | None = None) -> np.ndarray | None:
+    def read(self) -> np.ndarray | None:
         k = self._take()
         if k == 0:
             return None
-        noise = self._rng.standard_normal((self.n_channels, k)) * self.noise_level
-        if true_label is None:
-            return noise
-        idx = np.arange(self._phase, self._phase + k)
+        t = (self._phase + np.arange(k)) / self.sampling_rate  # (k,) 秒
         self._phase += k
-        osc = np.sin(2.0 * np.pi * (0.01 * (1 + true_label)) * idx)  # (k,)
-        pattern = self._patterns[true_label][:, None]                 # (n_channels, 1)
-        return pattern * osc[None, :] + noise
+        osc = np.sin(2.0 * np.pi * self._freqs[:, None] * t[None, :])  # (n_channels, k)
+        return osc + self._rng.standard_normal((self.n_channels, k)) * self.noise_level
 
 
 class DummySource(_PacedSource):
@@ -117,7 +106,7 @@ class DummySource(_PacedSource):
         super().__init__(n_channels, sampling_rate, rng)
         self.noise_level = noise_level
 
-    def read(self, true_label: int | None = None) -> np.ndarray | None:
+    def read(self) -> np.ndarray | None:
         k = self._take()
         if k == 0:
             return None
@@ -187,7 +176,7 @@ class LSLSource(SignalSource):
                 with self._lock:
                     self._q.extend(samples)
 
-    def read(self, true_label: int | None = None) -> np.ndarray | None:
+    def read(self) -> np.ndarray | None:
         """一次性排空后台队列，返回 ``(n_channels, k)``；队列空时返回 None。
 
         强制校验通道数 == ``n_channels``，不一致直接抛 :class:`ValueError`。
@@ -231,5 +220,5 @@ def create_source(config, rng: np.random.Generator | None = None) -> SignalSourc
     if kind == "dummy":
         return DummySource(config.n_channels, config.sampling_rate, rng=rng)
     if kind == "synthetic":
-        return SyntheticSource(config.n_channels, config.n_classes, config.sampling_rate, rng=rng)
+        return SyntheticSource(config.n_channels, config.sampling_rate, rng=rng)
     raise ValueError(f"未知 source_type: {config.source_type!r}（可选 lsl/dummy/synthetic）")

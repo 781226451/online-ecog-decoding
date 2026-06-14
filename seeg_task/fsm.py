@@ -80,7 +80,7 @@ class TrialFSM:
         tick = core.Clock()
         first = True
         while counter < self.acquire_samples:
-            chunk = self.source.read(true_label=action_index)  # 一次性取走全部可用数据
+            chunk = self.source.read()  # 一次性取走全部可用数据（与类别无关）
             if chunk is not None:
                 need = self.acquire_samples - counter
                 if chunk.shape[1] > need:        # 不超采，多余丢弃
