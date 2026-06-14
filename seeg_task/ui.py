@@ -236,9 +236,8 @@ class ExperimentUI:
 
         # 全屏提示用文字
         self.center_text = self._text(text="", height=0.05, pos=(0, 0), wrapWidth=self._half_w * 1.6)
-        self.rest_title = self._text(text="", height=0.07, pos=(0, 0.18), bold=True)
-        self.rest_status = self._text(text="", height=0.045, pos=(0, -0.05))
-        self.rest_count = self._text(text="", height=0.06, pos=(0, -0.22))
+        self.rest_title = self._text(text="", height=0.07, pos=(0, 0.10), bold=True)
+        self.rest_count = self._text(text="", height=0.06, pos=(0, -0.12))
 
     def _build_media_players(self) -> None:
         cfg = self.config
@@ -327,12 +326,11 @@ class ExperimentUI:
         self.draw_left_media(action_index)
         self.draw_right_panel()
 
-    def draw_rest(self, remaining: float, status: str) -> None:
+    def draw_rest(self, remaining: float) -> None:
+        # 休息界面不显示任何模型训练相关文字，仅提示休息与倒计时
         self.rest_title.text = "请休息"
-        self.rest_status.text = status
         self.rest_count.text = f"{remaining:0.0f} s"
         self.rest_title.draw()
-        self.rest_status.draw()
         self.rest_count.draw()
 
     def draw_message(self, text: str) -> None:

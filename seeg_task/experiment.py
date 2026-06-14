@@ -138,14 +138,13 @@ class Experiment:
         thread.start()
 
         applied = False
-        status = "正在更新模型…"
         clock = core.Clock()
         while clock.getTime() < cfg.rest_duration:
             remaining = cfg.rest_duration - clock.getTime()
             if not applied and not thread.is_alive():
-                status = self._update_status(result, error)
+                self._log_update_result(result, error)  # 仅记录日志，界面不显示训练文字
                 applied = True
-            ui.draw_rest(remaining, status)
+            ui.draw_rest(remaining)
             ui.flip()
             if ui.quit_requested():
                 raise QuitExperiment
@@ -153,10 +152,10 @@ class Experiment:
         # 休息结束仍未训完（极少见）：阻塞等待，保证模型更新已完成。
         if not applied:
             thread.join()
-            self._update_status(result, error)
+            self._log_update_result(result, error)
 
-    def _update_status(self, result: dict, error: dict) -> str:
-        """把后台 decoder.update 的结果转成休息界面的状态文案。"""
+    def _log_update_result(self, result: dict, error: dict) -> str:
+        """把后台 decoder.update 的结果记入日志（不在界面显示）。"""
         if "err" in error:
             print(f"[模型更新] 失败: {error['err']}")
             return "模型更新失败，沿用当前模型"
