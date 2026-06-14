@@ -16,6 +16,7 @@ trials_per_block = 8         # 每个 block 的试次数
 # ---- 各阶段时长（秒）-------------------------------------------------------
 cue_duration = 2.0           # CUE：全屏「当前动作为：{}」提示时长
 fixation_duration = 1.0      # FIXATION：盯点（白色十字）时长
+iti_duration = 3.0           # trial 间隔（仅 trial 之间，最后一个 trial 后不做）；0=无间隔
 predict_interval = 0.5       # EXECUTE 采集期内每隔多少秒做一次 predict（实时滚动解码）
 # 注：block 间休息无倒计时——先更新模型，再按空格进入下一 block
 

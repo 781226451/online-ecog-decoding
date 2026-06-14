@@ -132,6 +132,9 @@ class BlockFSM:
                         logger.info("trial 开始")
                         self.trial.run(action_index)
                     trial_idx += 1
+                    # trial 间隔（ITI）：仅在 trial 之间，最后一个 trial 后不做（直接进 block 休息）
+                    if trial_idx < cfg.trials_per_block and cfg.iti_duration > 0:
+                        _run_for(self.ui, cfg.iti_duration, lambda: None)
                 else:
                     state = BlockState.TRAIN_REST
             elif state == BlockState.TRAIN_REST:
