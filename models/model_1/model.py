@@ -1,13 +1,13 @@
-import abc
 import pickle
 import threading
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 from scipy import signal
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
+
+from seeg_task.decoder import BaseDecoder
 
 # ============================ 参数 ============================
 
@@ -30,53 +30,6 @@ BANDS = {
 BAND_NAMES = list(BANDS.keys())
 N_BANDS = len(BANDS)                # 4
 N_FEATURES = N_VALID_CH * N_BANDS   # 60
-
-
-class BaseDecoder(abc.ABC):
-    """实时解码器接口（抽象基类，仅定义接口，不含实现）。
-
-    一个解码器需具备两项能力，对应下面两个接口函数：
-
-    1. **推理** :meth:`predict` —— 把单个采集窗口映射为类别概率分布；
-    2. **模型更新** :meth:`update` —— 用历史样本在线更新自身模型。
-
-    ``Experiment`` 仅依赖这两个方法（外加 :meth:`from_config` 构造）；自定义解码器继承
-    本类并实现它们即可接入范式，无需改动其它代码。约定实现应提供整型属性 ``n_classes``。
-    """
-
-    n_classes: int
-
-    @abc.abstractmethod
-    def predict(self, x: np.ndarray) -> np.ndarray:
-        """推理：对单个采集窗口解码。
-
-        Args:
-            x: 形状 ``(n_channels, n_samples)`` 的原始信号窗口。
-
-        Returns:
-            形状 ``(n_classes,)`` 的概率分布（每个元素 >=0 且总和为 1）。
-        """
-        raise NotImplementedError
-
-    @abc.abstractmethod
-    def update(self, samples: "list[tuple[np.ndarray, int]]",
-               model_dir: str = "models",
-               blend_weight: float | None = None) -> bool:
-        """模型更新：用历史样本在线更新内部模型。
-
-        在 block 间休息时由后台线程调用，因此实现需**线程安全**（可能与 :meth:`predict`
-        并发）。
-
-        Args:
-            samples: ``[(x, label), ...]``，``x`` 形状 ``(n_channels, n_samples)``；
-                ``label`` 为整型类别标签，取值范围 ``0 .. N-1``。
-            model_dir: 模型保存目录。
-            blend_weight: 新旧模型融合权重（0~1），None 则按样本数自动计算。
-
-        Returns:
-            是否实际更新了模型。
-        """
-        raise NotImplementedError
 
 
 # ======================================================================
@@ -125,6 +78,10 @@ class LogisticBandPowerDecoder(BaseDecoder):
         self._fitted = False
         self._n_samples = 0          # 历史训练样本总数（用于新旧加权）
 
+    @classmethod
+    def from_config(cls, config, rng=None, **params) -> "LogisticBandPowerDecoder":
+        return cls(config.n_classes)
+
     # ----- 内部：构建滤波器 -----
 
     def _build_bandpass(self) -> np.ndarray:
@@ -166,8 +123,8 @@ class LogisticBandPowerDecoder(BaseDecoder):
 
     # ----- 推理 -----
 
-    def predict(self, x: np.ndarray) -> np.ndarray:
-        """单窗口解码。
+    def predict_inner(self, x: np.ndarray) -> np.ndarray:
+        """单窗口解码（由基类 predict 调用并校验输出）。
 
         Args:
             x: 形状 ``(n_channels, n_samples)`` 原始 EEG。
@@ -195,18 +152,14 @@ class LogisticBandPowerDecoder(BaseDecoder):
     # ----- 模型更新 -----
 
     def update(self, samples: "list[tuple[np.ndarray, int]]",
-               model_dir: str = "models",
                blend_weight: float | None = None) -> bool:
-        """用历史样本训练新模型，与旧模型加权融合后保存。
+        """用历史样本训练新模型，与旧模型加权融合（仅更新内存）。
 
         新模型 = (1 - w) * 旧模型 + w * 新模型，
         其中 w = n_new / (n_old + n_new)，也可手动指定 ``blend_weight``。
 
-        保存路径: ``{model_dir}/{YYYYMMDD_HHMMSS}.pkl``
-
         Args:
             samples: ``[(x, label), ...]``
-            model_dir: 模型保存目录，默认 ``"models"``。
             blend_weight: 新模型权重（0~1），None 表示按样本数自动计算。
 
         Returns:
@@ -269,31 +222,6 @@ class LogisticBandPowerDecoder(BaseDecoder):
                 self._fitted = True
 
             self._n_samples += n_new
-
-        # ---- 保存到磁盘 ----
-        Path(model_dir).mkdir(parents=True, exist_ok=True)
-        predict_path = Path(model_dir) / "predict.pkl"
-
-        # 构造轻量状态
-        state = {
-            "n_classes": self.n_classes,
-            "coef_": self._clf.coef_,
-            "intercept_": self._clf.intercept_,
-            "scaler_mean_": self._scaler.mean_,
-            "scaler_scale_": self._scaler.scale_,
-            "n_samples": self._n_samples,
-            "classes_": self._clf.classes_,
-        }
-
-        # 旧 predict.pkl → 归档为 日期时间.pkl
-        if predict_path.exists():
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            archive_path = Path(model_dir) / "{}.pkl".format(timestamp)
-            predict_path.rename(archive_path)
-
-        # 新权重写入 predict.pkl
-        with predict_path.open("wb") as f:
-            pickle.dump(state, f)
 
         return True
 
