@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import threading
 from enum import Enum, auto
+from pathlib import Path
 
 import numpy as np
 from loguru import logger
@@ -88,9 +89,10 @@ class TrialFSM:
                 tick.reset()
                 probs = self.decoder.predict(self.buffer.current_item)
                 pred = int(np.argmax(probs))
-                logger.info("predict | x={} -> {}({}) p={:.3f}",
+                logger.info("predict | x={} -> {}({}) p={:.3f} probs={}",
                             tuple(self.buffer.current_item.shape), pred,
-                            cfg.actions[pred].label, float(probs[pred]))
+                            cfg.actions[pred].label, float(probs[pred]),
+                            [round(float(p), 4) for p in probs])
                 ui.record_result(pred, action_index, probs)
             ui.draw_cue(action_index)  # 动作名 + 右侧实时正确率
             ui.flip()
@@ -106,13 +108,15 @@ class TrialFSM:
 class BlockFSM:
     """block 级状态机：TRIAL → TRAIN_REST → FINISH，驱动整场实验（不含引导/总结页）。"""
 
-    def __init__(self, config, source, decoder, buffer, ui, rng) -> None:
+    def __init__(self, config, source, decoder, buffer, ui, rng,
+                 session_dir: Path | None = None) -> None:
         self.config = config
         self.source = source
         self.decoder = decoder
         self.buffer = buffer
         self.ui = ui
         self.rng = rng
+        self.session_dir = session_dir
         self.trial = TrialFSM(config, source, decoder, buffer, ui)
 
     def run(self) -> None:
@@ -139,6 +143,7 @@ class BlockFSM:
                     state = BlockState.TRAIN_REST
             elif state == BlockState.TRAIN_REST:
                 if block < cfg.n_blocks - 1:
+                    self._save_block_data(block)
                     with logger.contextualize(block=block + 1, trial="-", action="train"):
                         self._rest_and_train()
                     block += 1
@@ -149,7 +154,15 @@ class BlockFSM:
                 else:
                     state = BlockState.FINISH
             else:  # FINISH
+                self._save_block_data(block)
                 break
+
+    # --- block 数据保存 ---------------------------------------------------
+    def _save_block_data(self, block: int) -> None:
+        base = self.session_dir if self.session_dir is not None else Path("data")
+        path = base / "block" / f"block_{block + 1}.pkl"
+        self.buffer.save_block(path)
+        logger.info("block {} 数据已保存至 {}", block + 1, path)
 
     # --- block 起始动作 ---------------------------------------------------
     def _begin_block(self) -> None:
