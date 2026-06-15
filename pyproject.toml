@@ -9,6 +9,5 @@ dependencies = [
     "loguru>=0.7",
     "scikit-learn==1.9.0",
     "scipy-stubs~=1.14.1",
-    "scipy>=1.14.1",
-    "pyedflib>=0.1.42",
+    "scipy>=1.14.1"
 ]
