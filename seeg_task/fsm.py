@@ -78,14 +78,12 @@ class TrialFSM:
         self.buffer.reset_current_item()  # 进入 EXECUTE：清单次缓存
         exec_clock = core.Clock()         # 执行期计时：到 execute_duration 即结束
         tick = core.Clock()               # 推理计时：每 predict_interval 推理一次
-        first = True
         while exec_clock.getTime() < cfg.execute_duration:
             chunk = self.source.read()  # 取走全部可用数据，喂入滑动窗口
             if chunk is not None:
                 self.buffer.update_current_items(chunk)
-            # 定时推理：对整个 current_item 解码并刷新正确率（首帧也来一次）
-            if first or tick.getTime() >= cfg.predict_interval:
-                first = False
+            # 定时推理：对整个 current_item 解码并刷新正确率
+            if tick.getTime() >= cfg.predict_interval:
                 tick.reset()
                 probs = self.decoder.predict(self.buffer.current_item)
                 pred = int(np.argmax(probs))
