@@ -1,5 +1,6 @@
 """信号采集接口。
 
+
 信号源是**流式数据源**，对外只有三件事：
 
 - :meth:`SignalSource.read`  : 一次性取走当前**全部可用**数据，返回 ``(n_channels, k)`` 或 ``None``。
@@ -27,6 +28,7 @@ import time
 from collections import deque
 
 import numpy as np
+from loguru import logger
 
 
 class SignalSource(abc.ABC):
@@ -173,6 +175,7 @@ class LSLSource(SignalSource):
                 print(f"[LSLSource] pull_chunk 异常: {exc}")
                 continue
             if samples:
+                logger.debug("LSL pull_chunk: {} samples", len(samples))
                 with self._lock:
                     self._q.extend(samples)
 
@@ -191,6 +194,7 @@ class LSLSource(SignalSource):
             raise ValueError(
                 f"收到样本通道数 {chunk.shape[0]} 与配置 n_channels {self.n_channels} 不一致"
             )
+        logger.debug("LSL read: {} frames", chunk.shape[1])
         return chunk
 
     def flush(self) -> None:

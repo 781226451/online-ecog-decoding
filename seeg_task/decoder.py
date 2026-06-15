@@ -281,4 +281,11 @@ def create_decoder(config, rng: np.random.Generator | None = None):
     for method in ("predict", "update"):
         if not callable(getattr(decoder, method, None)):
             raise TypeError(f"{target} 缺少必需的可调用方法 {method}()")
+
+    decoder_n = getattr(decoder, "n_classes", None)
+    if decoder_n is not None and decoder_n != config.n_classes:
+        raise ValueError(
+            f"解码器 n_classes={decoder_n} 与 actions 数量 {config.n_classes} 不一致"
+        )
+
     return decoder

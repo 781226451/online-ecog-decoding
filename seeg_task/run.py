@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 from loguru import logger
@@ -24,23 +26,28 @@ _LOG_FORMAT = (
 )
 
 
-def _configure_logging(level: str = "INFO", log_file: str | None = None) -> None:
-    """配置 Loguru：控制台输出，可选同时写入文件（按级别过滤）。
+def _configure_logging(level: str = "INFO", log_file: str | None = None, *, write_file: bool = True) -> None:
+    """配置 Loguru：控制台输出，``write_file=True`` 时同时写入文件。
 
     日志格式带上下文字段 ``blk/trial/act``（block id、trial id、当前动作名）；
     无上下文时显示默认占位 ``-``（见 :meth:`~seeg_task.fsm.BlockFSM.run` 的 contextualize）。
+    ``write_file=True`` 且 ``log_file`` 为 None 时自动生成路径 ``logs/YYYY-MM-DD_HHMMSS.log``。
     """
     level = str(level).upper()
     logger.remove()  # 移除 Loguru 默认 handler，避免重复输出
     logger.configure(extra={"block": "-", "trial": "-", "action": "-"})  # 上下文默认值
     logger.add(sys.stderr, level=level, format=_LOG_FORMAT)
-    if log_file:
+    if write_file:
+        if log_file is None:
+            log_dir = Path("logs")
+            log_dir.mkdir(exist_ok=True)
+            log_file = str(log_dir / f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.log")
         logger.add(log_file, level=level, format=_LOG_FORMAT, encoding="utf-8")
 
 
 def _selftest() -> int:
     """不打开窗口，验证核心数据/模型契约。返回 0 表示通过。"""
-    _configure_logging("WARNING")  # 抑制自检中数百次 predict 的 INFO 日志
+    _configure_logging("WARNING", write_file=False)  # 抑制自检中数百次 predict 的 INFO 日志
     from .buffer import BlockBuffer
     from .decoder import Decoder, LinearModel
     from .model_update import ModelTrainer
