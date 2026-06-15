@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 from psychopy import core
 
@@ -25,6 +27,7 @@ class Experiment:
         config: ExperimentConfig | None = None,
         source: SignalSource | None = None,
         decoder: BaseDecoder | None = None,
+        session_dir: Path | None = None,
     ) -> None:
         self.config = config or ExperimentConfig()
         self.config.validate()
@@ -35,6 +38,7 @@ class Experiment:
         self.decoder = decoder or create_decoder(cfg, rng=self.rng)
         # current_item 窗口大小 = 解码窗口长度；EXECUTE 期间按时长流式推入样本
         self.buffer = BlockBuffer(cfg.n_channels, cfg.window_samples)
+        self.session_dir = session_dir
 
         self.ui: ExperimentUI | None = None
 
@@ -54,7 +58,8 @@ class Experiment:
             if "escape" in keys:
                 raise QuitExperiment
 
-            BlockFSM(cfg, self.source, self.decoder, self.buffer, ui, self.rng).run()
+            BlockFSM(cfg, self.source, self.decoder, self.buffer, ui, self.rng,
+                     session_dir=self.session_dir).run()
 
             self._show_summary()
         except QuitExperiment:

@@ -177,11 +177,14 @@ def main() -> int:
     if args.log_file is not None:
         cfg.log_file = args.log_file
 
-    _configure_logging(cfg.log_level, cfg.log_file)
+    session_dir = Path("data") / datetime.now().strftime("%Y%m%d_%H%M%S")
+    session_dir.mkdir(parents=True, exist_ok=True)
+    log_file = cfg.log_file if cfg.log_file is not None else str(session_dir / "run.log")
+    _configure_logging(cfg.log_level, log_file)
 
     from .experiment import Experiment
 
-    Experiment(config=cfg).run()
+    Experiment(config=cfg, session_dir=session_dir).run()
     return 0
 
 

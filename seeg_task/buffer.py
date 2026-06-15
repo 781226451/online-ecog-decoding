@@ -16,6 +16,9 @@ O(C·N) 的“有序化”推迟到读取 ``current_item`` 时才做，从而在
 
 from __future__ import annotations
 
+import pickle
+from pathlib import Path
+
 import numpy as np
 
 
@@ -38,6 +41,7 @@ class BlockBuffer:
         self._buf: np.ndarray = np.zeros((n_channels, window_samples), dtype=dtype)
         self._pos: int = 0
         self.items: list[tuple[np.ndarray, int]] = []
+        self._predict_cache: list[np.ndarray] = []
 
     def update_current_items(self, chunk: np.ndarray) -> None:
         """批量 FIFO 推入多列新数据（按时间顺序，第 0 列最旧；最新的覆盖最旧的）。
@@ -72,9 +76,14 @@ class BlockBuffer:
 
     @property
     def current_item(self) -> np.ndarray:
-        """返回时间有序（最旧在前）的滑动窗口副本，形状 ``(n_channels, window_samples)``。"""
+        """返回时间有序（最旧在前）的滑动窗口副本，形状 ``(n_channels, window_samples)``。
+
+        每次访问都会把该副本追加到内部 ``_predict_cache`` 中。
+        """
         # 写指针把环切成两段：[pos:] 为较旧部分，[:pos] 为较新部分（pos==0 时后段为空，结果即整窗）
-        return np.concatenate([self._buf[:, self._pos:], self._buf[:, : self._pos]], axis=1)
+        item = np.concatenate([self._buf[:, self._pos:], self._buf[:, : self._pos]], axis=1)
+        self._predict_cache.append(item)
+        return item
 
     def update_buffer(self, label: int) -> None:
         """把当前窗口（有序副本）与 ``label`` 打包成 tuple 存入 :attr:`items`，随后清空当前窗口。
@@ -90,10 +99,30 @@ class BlockBuffer:
         self._buf[:] = 0
         self._pos = 0
 
+    def save_block(self, path: str | Path) -> None:
+        """把本 block 的预测缓存与训练样本存档保存为 pkl 文件。
+
+        文件内容为 dict，键为：
+        - ``predict_cache_list`` : ``_predict_cache`` 的快照（每次 ``current_item`` 的副本列表）。
+        - ``update_cache_list``  : ``items`` 的快照（``(ndarray, label)`` 元组列表）。
+
+        Args:
+            path: 目标文件路径（不存在的父目录会自动创建）。
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "predict_cache_list": list(self._predict_cache),
+            "update_cache_list": list(self.items),
+        }
+        with open(path, "wb") as f:
+            pickle.dump(payload, f)
+
     def clean(self) -> None:
-        """清除所有数据：``current_item`` 重置为全 0，并清空已存档的 :attr:`items`。"""
+        """清除所有数据：``current_item`` 重置为全 0，并清空已存档的 :attr:`items` 与 ``_predict_cache``。"""
         self.reset_current_item()
         self.items.clear()
+        self._predict_cache.clear()
 
     def __len__(self) -> int:
         """已存档样本数。"""
