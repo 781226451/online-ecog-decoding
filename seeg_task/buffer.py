@@ -74,14 +74,17 @@ class BlockBuffer:
             self._buf[:, : end - n] = chunk[:, first:]
         self._pos = end % n
 
+    def _snapshot(self) -> np.ndarray:
+        """返回时间有序（最旧在前）的滑动窗口副本，不写入 ``_predict_cache``。"""
+        return np.concatenate([self._buf[:, self._pos:], self._buf[:, : self._pos]], axis=1)
+
     @property
     def current_item(self) -> np.ndarray:
         """返回时间有序（最旧在前）的滑动窗口副本，形状 ``(n_channels, window_samples)``。
 
         每次访问都会把该副本追加到内部 ``_predict_cache`` 中。
         """
-        # 写指针把环切成两段：[pos:] 为较旧部分，[:pos] 为较新部分（pos==0 时后段为空，结果即整窗）
-        item = np.concatenate([self._buf[:, self._pos:], self._buf[:, : self._pos]], axis=1)
+        item = self._snapshot()
         self._predict_cache.append(item)
         return item
 
@@ -91,7 +94,7 @@ class BlockBuffer:
         Args:
             label: 整型类别标签（取值范围 ``0 .. N-1``）。存档为 ``(current_item, label)``。
         """
-        self.items.append((self.current_item, int(label)))
+        self.items.append((self._snapshot(), int(label)))
         self.reset_current_item()  # 仅清空 current_item（保留已存档 items），避免跨段残留
 
     def reset_current_item(self) -> None:
