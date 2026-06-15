@@ -85,7 +85,7 @@ class TrialFSM:
             # 定时推理：对整个 current_item 解码并刷新正确率
             if tick.getTime() >= cfg.predict_interval:
                 tick.reset()
-                item = self.buffer.current_item
+                item = self.buffer.record_predict()
                 probs = self.decoder.predict(item)
                 pred = int(np.argmax(probs))
                 logger.info("predict | x={} -> {}({}) p={:.3f} probs={}",

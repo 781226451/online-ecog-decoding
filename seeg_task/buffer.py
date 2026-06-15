@@ -82,7 +82,14 @@ class BlockBuffer:
     def current_item(self) -> np.ndarray:
         """返回时间有序（最旧在前）的滑动窗口副本，形状 ``(n_channels, window_samples)``。
 
-        每次访问都会把该副本追加到内部 ``_predict_cache`` 中。
+        纯读取，不产生任何副作用。如需同时记录到 predict_cache，请使用 :meth:`record_predict`。
+        """
+        return self._snapshot()
+
+    def record_predict(self) -> np.ndarray:
+        """取当前窗口快照，追加到 ``_predict_cache``，并返回该快照供推理使用。
+
+        每次推理应调用此方法而非直接访问 ``current_item``，以确保预测记录准确。
         """
         item = self._snapshot()
         self._predict_cache.append(item)
