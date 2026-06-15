@@ -151,10 +151,15 @@ class LSLSource(SignalSource):
         self._inlet = StreamInlet(streams[0])
         info = self._inlet.info()
         self._stream_channels = info.channel_count()
-        if self._stream_channels != n_channels:
+        if self._stream_channels < n_channels:
             raise ValueError(
-                f"LSL 流通道数 {self._stream_channels} 与配置 n_channels {n_channels} 不一致；"
-                f"请把 n_channels 设为 {self._stream_channels}（或选用通道数匹配的流）。"
+                f"LSL 流通道数 {self._stream_channels} 小于配置 n_channels {n_channels}；"
+                f"请把 n_channels 设为不超过 {self._stream_channels} 的值。"
+            )
+        if self._stream_channels > n_channels:
+            logger.warning(
+                "LSL 流通道数 {} > n_channels {}，将只取前 {} 个通道",
+                self._stream_channels, n_channels, n_channels,
             )
         srate = info.nominal_srate()
         print(f"[LSLSource] 已连接流 '{info.name()}' "
@@ -177,7 +182,7 @@ class LSLSource(SignalSource):
             if samples:
                 logger.debug("LSL pull_chunk: {} samples", len(samples))
                 with self._lock:
-                    self._q.extend(samples)
+                    self._q.extend(s[: self.n_channels] for s in samples)
 
     def read(self) -> np.ndarray | None:
         """一次性排空后台队列，返回 ``(n_channels, k)``；队列空时返回 None。
@@ -189,11 +194,8 @@ class LSLSource(SignalSource):
                 return None
             frames = list(self._q)
             self._q.clear()
-        chunk = np.asarray(frames, dtype=np.float64).T  # (channels, k)
-        if chunk.shape[0] != self.n_channels:
-            raise ValueError(
-                f"收到样本通道数 {chunk.shape[0]} 与配置 n_channels {self.n_channels} 不一致"
-            )
+        chunk = np.asarray(frames, dtype=np.float64).T  # (stream_channels, k)
+        chunk = chunk[: self.n_channels]               # 截取前 n_channels 个通道
         logger.debug("LSL read: {} frames", chunk.shape[1])
         return chunk
 

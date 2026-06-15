@@ -42,7 +42,7 @@ decoder_class = "models.model_1.model.LogisticBandPowerDecoder"
 # 传给解码器 from_config 的额外参数见文件末尾可选的 [decoder_params] 表。
 
 # ---- 显示 ------------------------------------------------------------------
-fullscreen = false
+fullscreen = true
 window_size = [1280, 720]
 background_color = [-0.2, -0.2, -0.2]   # PsychoPy rgb，范围 [-1, 1]
 text_color = [1.0, 1.0, 1.0]
