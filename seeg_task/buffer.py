@@ -6,7 +6,7 @@
 - ``current_item`` : 固定大小 ``(C, N)`` 的滑动窗口（C=通道数，N=采样点数），最旧在前。
 - :meth:`update_current_items` : 传入 ``(C, k)`` 多列新数据，按 FIFO 推入——丢弃最旧、
   在末尾追加（窗口整体左移 k 格）。
-- :meth:`update_buffer` : 传入一个整型 ``label``，把 ``current_item`` 的副本与 ``label`` 打包成
+- :meth:`save_sample` : 传入一个整型 ``label``，把 ``current_item`` 的副本与 ``label`` 打包成
   定长 tuple ``(ndarray, int)`` 存入存档列表 :attr:`items`。
 - :meth:`clean` : 清除所有数据——把 ``current_item`` 重置为全 0，并清空已存档的 :attr:`items`。
 
@@ -95,16 +95,16 @@ class BlockBuffer:
         self._predict_cache.append(item)
         return item
 
-    def update_buffer(self, label: int) -> None:
+    def save_sample(self, label: int) -> None:
         """把当前窗口（有序副本）与 ``label`` 打包成 tuple 存入 :attr:`items`，随后清空当前窗口。
 
         Args:
             label: 整型类别标签（取值范围 ``0 .. N-1``）。存档为 ``(current_item, label)``。
         """
         self.items.append((self._snapshot(), int(label)))
-        self.reset_current_item()  # 仅清空 current_item（保留已存档 items），避免跨段残留
+        self.reset_window()  # 仅清空 current_item（保留已存档 items），避免跨段残留
 
-    def reset_current_item(self) -> None:
+    def reset_window(self) -> None:
         """把滑动窗口 ``current_item`` 重置为全 0（不影响 :attr:`items`）。"""
         self._buf[:] = 0
         self._pos = 0
@@ -130,7 +130,7 @@ class BlockBuffer:
 
     def clean(self) -> None:
         """清除所有数据：``current_item`` 重置为全 0，并清空已存档的 :attr:`items` 与 ``_predict_cache``。"""
-        self.reset_current_item()
+        self.reset_window()
         self.items.clear()
         self._predict_cache.clear()
 

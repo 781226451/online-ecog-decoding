@@ -81,8 +81,8 @@ def _selftest() -> int:
 
     # 2) BlockBuffer：批量推入 -> 存档 -> 清空
     bb = BlockBuffer(cfg.n_channels, wlen)
-    bb.update_current_items(window(0)); bb.update_buffer(0)
-    bb.update_current_items(window(1)); bb.update_buffer(1)
+    bb.update_current_items(window(0)); bb.save_sample(0)
+    bb.update_current_items(window(1)); bb.save_sample(1)
     assert len(bb) == 2 and bb.items[0][0].shape == (cfg.n_channels, wlen)
     bb.clean(); assert len(bb) == 0
     print("[ok] BlockBuffer 存档/清空正常")

@@ -75,7 +75,7 @@ class TrialFSM:
     def _execute(self, action_index: int) -> None:
         cfg, ui = self.config, self.ui
         self.source.flush()               # 丢弃 CUE/FIXATION 期积压，只采执行期数据
-        self.buffer.reset_current_item()  # 进入 EXECUTE：清单次缓存
+        self.buffer.reset_window()  # 进入 EXECUTE：清单次缓存
         exec_clock = core.Clock()         # 执行期计时：到 execute_duration 即结束
         tick = core.Clock()               # 推理计时：每 predict_interval 推理一次
         while exec_clock.getTime() < cfg.execute_duration:
@@ -101,7 +101,7 @@ class TrialFSM:
 
     # --- FINISH：存档（trial 收尾）---------------------------------------
     def _finish(self, action_index: int) -> None:
-        self.buffer.update_buffer(action_index)  # 窗口+label 入 block 存档
+        self.buffer.save_sample(action_index)  # 窗口+label 入 block 存档
 
 
 class BlockFSM:
