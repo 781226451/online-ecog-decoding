@@ -80,7 +80,6 @@ class TrialFSM:
         self.source.flush()               # 丢弃 CUE/FIXATION 期积压，只采执行期数据
         self.buffer.reset_window()  # 进入 EXECUTE：清单次缓存
         ui.reset_trial_stats()       # 重置本 trial 正确率统计
-        self.buffer.reset_current_item()  # 进入 EXECUTE：清单次缓存
         label = cfg.actions[action_index].label
         self._push_event(phase="EXECUTE_START", action=label, action_index=action_index)
         exec_clock = core.Clock()         # 执行期计时：到 execute_duration 即结束
@@ -92,19 +91,15 @@ class TrialFSM:
             # 定时推理：对整个 current_item 解码并刷新正确率
             if tick.getTime() >= cfg.predict_interval:
                 tick.reset()
-                item = self.buffer.record_predict()
-                probs = self.decoder.predict(item)
                 # 推理前取 LSL 时间戳：PREDICT marker 对齐到“解码窗口截止/决策开始”，
                 # 不含模型推理耗时（耗时随模型变化，否则会污染时间戳）
                 t_pred = local_clock()
-                probs = self.decoder.predict(self.buffer.current_item)
+                item = self.buffer.record_predict()
+                probs = self.decoder.predict(item)
                 pred = int(np.argmax(probs))
                 logger.info("predict | x={} p={:.3f} probs={}",
                             tuple(item.shape), float(probs[action_index]),
                             [round(float(p), 4) for p in probs])
-                logger.info("predict | x={} -> {}({}) p={:.3f}",
-                            tuple(self.buffer.current_item.shape), pred,
-                            cfg.actions[pred].label, float(probs[pred]))
                 self._push_event(timestamp=t_pred, phase="PREDICT",
                                  action=label, action_index=action_index,
                                  pred=pred, pred_label=cfg.actions[pred].label,
