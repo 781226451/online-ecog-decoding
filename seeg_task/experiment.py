@@ -61,7 +61,9 @@ class Experiment:
             BlockFSM(cfg, self.source, self.decoder, self.buffer, ui, self.rng,
                      session_dir=self.session_dir).run()
 
-            self._show_summary()
+            ui.draw_message("实验结束，按任意键退出。")
+            ui.flip()
+            ui.wait_keys()
         except QuitExperiment:
             ui.draw_message("已退出实验。")
             ui.flip()
@@ -69,14 +71,3 @@ class Experiment:
         finally:
             ui.close()
             self.source.close()
-
-    def _show_summary(self) -> None:
-        ui = self.ui
-        pct = 100.0 * ui.total_correct / ui.total_trials if ui.total_trials else 0.0
-        ui.draw_message(
-            "实验结束\n\n"
-            f"总体解码正确率：{pct:.1f}%  ({ui.total_correct}/{ui.total_trials})\n\n"
-            "按任意键退出。"
-        )
-        ui.flip()
-        ui.wait_keys()
