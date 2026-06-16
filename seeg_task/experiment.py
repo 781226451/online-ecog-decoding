@@ -6,11 +6,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 import numpy as np
 from psychopy import core
+from pylsl import StreamInfo, StreamOutlet, cf_string
 
 from .buffer import BlockBuffer
 from .config import ExperimentConfig
@@ -18,6 +19,22 @@ from .decoder import BaseDecoder, create_decoder
 from .fsm import BlockFSM, QuitExperiment
 from .signal_source import SignalSource, create_source
 from .ui import ExperimentUI
+
+
+def _create_marker_outlet():
+    # pylsl 为必装依赖；try/except 仅兜底 outlet 运行期创建失败（如 LSL 网络异常），
+    # 失败时返回 None，事件改为不推送（见 _make_event_pusher 的 no-op 降级）。
+    try:
+        info = StreamInfo(
+            "ParadigmEvents", "Markers", 1, 0, cf_string,
+            source_id="seeg-interaction-task",
+        )
+        outlet = StreamOutlet(info)
+        print("[events] LSL marker 流已创建 (ParadigmEvents / Markers)")
+        return outlet
+    except Exception as exc:
+        print(f"[events] 创建 LSL marker 流出错，事件将不推送: {exc}")
+        return None
 
 
 class Experiment:
@@ -47,7 +64,7 @@ class Experiment:
         cfg = self.config
         self.ui = ExperimentUI(cfg)
         ui = self.ui
-        marker_outlet = self._create_marker_outlet()
+        marker_outlet = _create_marker_outlet()
         try:
             ui.draw_message(
                 "SEEG 脑机接口任务\n\n"
@@ -75,31 +92,6 @@ class Experiment:
         finally:
             ui.close()
             self.source.close()
-
-    def _create_marker_outlet(self):
-        try:
-            from pylsl import StreamInfo, StreamOutlet
-            info = StreamInfo(
-                "ParadigmEvents", "Markers", 1, 0, "string",
-                source_id="seeg-interaction-task",
-            )
-            outlet = StreamOutlet(info)
-            print("[events] LSL marker 流已创建 (ParadigmEvents / Markers)")
-            return outlet
-        except Exception as exc:
-            print(f"[events] 创建 LSL marker 流出错，事件将不推送: {exc}")
-            return None
-
-    def _show_summary(self) -> None:
-        ui = self.ui
-        pct = 100.0 * ui.total_correct / ui.total_trials if ui.total_trials else 0.0
-        ui.draw_message(
-            "实验结束\n\n"
-            f"总体解码正确率：{pct:.1f}%  ({ui.total_correct}/{ui.total_trials})\n\n"
-            "按任意键退出。"
-        )
-        ui.flip()
-        ui.wait_keys()
 
 
 def _make_event_pusher(outlet):
