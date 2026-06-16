@@ -104,8 +104,8 @@ class TrialFSM:
                                  action=label, action_index=action_index,
                                  pred=pred, pred_label=cfg.actions[pred].label,
                                  confidence=float(probs[pred]))
-                ui.record_result(pred, action_index, probs)
-            ui.draw_cue(action_index)  # 动作名 + 右侧实时正确率
+                ui.record_result(action_index, probs)
+            ui.draw_cue(action_index)  # 动作名 + 右侧实时概率
             ui.flip()
             if ui.quit_requested():
                 raise QuitExperiment

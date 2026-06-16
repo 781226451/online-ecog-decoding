@@ -58,8 +58,6 @@ class ExperimentUI:
         self._right_x = aspect / 4.0         # 右面板中心 x
 
         self.current_action: int | None = None
-        self._trial_correct: int = 0
-        self._trial_total: int = 0
         self._cue_prob: float | None = None
 
         self._build_static_stims()
@@ -104,18 +102,12 @@ class ExperimentUI:
 
     # --- 统计更新 -----------------------------------------------------------
     def reset_trial_stats(self) -> None:
-        """每个 trial 的 EXECUTE 开始时调用，确保显示本 trial 的正确率。"""
-        self._trial_correct = 0
-        self._trial_total = 0
+        """每个 trial 的 EXECUTE 开始时调用，清空上一个 trial 残留的概率显示。"""
         self._cue_prob = None
 
-    def record_result(self, predicted: int, true_label: int, probs: np.ndarray | None = None) -> bool:
-        correct = int(predicted) == int(true_label)
-        self._trial_total += 1
-        if correct:
-            self._trial_correct += 1
+    def record_result(self, true_label: int, probs: np.ndarray | None = None) -> None:
+        """记录本次预测：右面板显示真实类别（true_label）的预测概率。"""
         self._cue_prob = float(probs[true_label]) if probs is not None else None
-        return correct
 
     # --- 绘制（不 flip）-----------------------------------------------------
     def draw_right_panel(self) -> None:
