@@ -57,12 +57,8 @@ class ExperimentUI:
         self._left_x = -aspect / 4.0         # 左面板中心 x
         self._right_x = aspect / 4.0         # 右面板中心 x
 
-        # 运行统计：按动作分别累计分类正确率（整个实验过程累计）
-        self.total_correct = 0
-        self.total_trials = 0
         self.current_action: int | None = None
-        self.action_correct = np.zeros(config.n_classes, dtype=int)
-        self.action_total = np.zeros(config.n_classes, dtype=int)
+        self._last_p: float | None = None
 
         self._build_static_stims()
 
@@ -87,11 +83,11 @@ class ExperimentUI:
             text="", height=0.09, pos=(self._left_x, 0.0), bold=True,
         )
 
-        # 右面板：当前动作的实时分类正确率（标题 + 大号百分比）
+        # 右面板：最新解码置信度 p = probs[predicted]
         self.acc_title = self._text(
-            text="实时正确率", height=0.06, pos=(self._right_x, 0.12), bold=True,
+            text="解码置信度", height=0.06, pos=(self._right_x, 0.12), bold=True,
         )
-        self.acc_value = self._text(text="--%", height=0.28, pos=(self._right_x, -0.08), bold=True)
+        self.acc_value = self._text(text="---", height=0.28, pos=(self._right_x, -0.08), bold=True)
 
         # 全屏 CUE 文字 与 全屏盯点白色十字（trial 级 FSM 使用）
         self.cue_text = self._text(text="", height=0.09, pos=(0, 0), bold=True,
@@ -105,22 +101,14 @@ class ExperimentUI:
 
     # --- 统计更新 -----------------------------------------------------------
     def record_result(self, predicted: int, true_label: int, probs: np.ndarray | None = None) -> bool:
-        correct = int(predicted) == int(true_label)
-        self.total_trials += 1
-        self.action_total[true_label] += 1
-        if correct:
-            self.total_correct += 1
-            self.action_correct[true_label] += 1
-        return correct
+        if probs is not None:
+            self._last_p = float(probs[predicted])
+        return int(predicted) == int(true_label)
 
     # --- 绘制（不 flip）-----------------------------------------------------
     def draw_right_panel(self) -> None:
-        """右面板：仅显示「当前动作」的实时分类正确率（标题 + 大号百分比）。"""
-        i = self.current_action
-        if i is not None and int(self.action_total[i]) > 0:
-            self.acc_value.text = f"{100.0 * self.action_correct[i] / int(self.action_total[i]):.0f}%"
-        else:
-            self.acc_value.text = "--%"
+        """右面板：显示最新一次 predict 的置信度 p = probs[predicted]。"""
+        self.acc_value.text = f"{self._last_p:.3f}" if self._last_p is not None else "---"
         self.acc_title.draw()
         self.acc_value.draw()
 
