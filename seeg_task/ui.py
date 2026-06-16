@@ -87,7 +87,7 @@ class ExperimentUI:
 
         # 右面板：实时解码结果
         self.acc_title = self._text(
-            text="正确率", height=0.06, pos=(self._right_x, 0.12), bold=True,
+            text="准确率", height=0.06, pos=(self._right_x, 0.12), bold=True,
         )
         self.acc_value = self._text(text="--", height=0.18, pos=(self._right_x, -0.02), bold=True)
         self.pred_prob = self._text(text="", height=0.05, pos=(self._right_x, -0.22))
