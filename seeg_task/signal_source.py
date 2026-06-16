@@ -129,7 +129,6 @@ class LSLSource(SignalSource):
         stream_type: str = "EEG",
         resolve_timeout: float = 5.0,
         pull_timeout: float = 0.2,
-        max_queue: int = 4096,
     ) -> None:
         super().__init__(n_channels)
         try:
@@ -166,7 +165,7 @@ class LSLSource(SignalSource):
               f"(type={info.type()}, ch={self._stream_channels}, srate={srate})")
 
         self._pull_timeout = pull_timeout
-        self._q: deque = deque(maxlen=max_queue)  # FIFO：后台入队、主线程排空
+        self._q: deque = deque()  # 无界 FIFO：后台入队、主线程排空
         self._lock = threading.Lock()
         self._running = True
         self._thread = threading.Thread(target=self._pull_loop, name="lsl-puller", daemon=True)
