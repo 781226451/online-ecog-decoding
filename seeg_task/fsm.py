@@ -91,7 +91,7 @@ class TrialFSM:
                 pred = int(np.argmax(probs))
                 logger.info("predict | x={} -> {}({}) p={:.3f} probs={}",
                             tuple(item.shape), pred,
-                            cfg.actions[pred].label, float(probs[pred]),
+                            cfg.actions[pred].label, float(probs[action_index]),
                             [round(float(p), 4) for p in probs])
                 ui.record_result(pred, action_index, probs)
             ui.draw_cue(action_index)  # 动作名 + 右侧实时正确率
