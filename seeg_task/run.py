@@ -177,6 +177,12 @@ def main() -> int:
     if args.log_file is not None:
         cfg.log_file = args.log_file
 
+    from .experiment import Experiment, _create_marker_outlet
+
+    # 尽早创建 marker outlet：让 LabRecorder 在下方被试信息输入框阶段就能发现并连上
+    # ParadigmEvents 流，等范式开始推送 marker 时消费者已就绪，避免样本被丢。
+    marker_outlet = _create_marker_outlet()
+
     from psychopy import gui
     dlg = gui.Dlg(title="被试信息")
     dlg.addField("被试编号:", "")
@@ -191,9 +197,7 @@ def main() -> int:
     log_file = cfg.log_file if cfg.log_file is not None else str(session_dir / "run.log")
     _configure_logging(cfg.log_level, log_file)
 
-    from .experiment import Experiment
-
-    Experiment(config=cfg, session_dir=session_dir).run()
+    Experiment(config=cfg, session_dir=session_dir, marker_outlet=marker_outlet).run()
     return 0
 
 
