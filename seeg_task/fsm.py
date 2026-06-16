@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 from psychopy import core
-
+from pylsl import local_clock
 
 class QuitExperiment(Exception):
     """用户按下 Esc 请求退出（视为强制转移到终态）。"""
@@ -49,12 +49,13 @@ def _run_for(ui, duration: float, draw_fn) -> None:
 class TrialFSM:
     """单个 trial 的状态机：CUE → FIXATION → EXECUTE → FINISH。"""
 
-    def __init__(self, config, source, decoder, buffer, ui) -> None:
+    def __init__(self, config, source, decoder, buffer, ui, push_event=None) -> None:
         self.config = config
         self.source = source
         self.decoder = decoder
         self.buffer = buffer
         self.ui = ui
+        self._push_event = push_event or (lambda **kw: None)
 
     def run(self, action_index: int) -> None:
         self._cue(action_index)
@@ -65,10 +66,12 @@ class TrialFSM:
     # --- CUE：全屏「当前动作为：{}」---------------------------------------
     def _cue(self, action_index: int) -> None:
         label = self.config.actions[action_index].label
+        self._push_event(phase="CUE_START", action=label, action_index=action_index)
         _run_for(self.ui, self.config.cue_duration, lambda: self.ui.draw_cue_text(label))
 
     # --- FIXATION：全屏白色十字 -------------------------------------------
     def _fixation(self) -> None:
+        self._push_event(phase="FIXATION_START")
         _run_for(self.ui, self.config.fixation_duration, self.ui.draw_fixation_cross)
 
     # --- EXECUTE：按时长计时，定时推理；到点进 FINISH --------------------
@@ -77,6 +80,9 @@ class TrialFSM:
         self.source.flush()               # 丢弃 CUE/FIXATION 期积压，只采执行期数据
         self.buffer.reset_window()  # 进入 EXECUTE：清单次缓存
         ui.reset_trial_stats()       # 重置本 trial 正确率统计
+        self.buffer.reset_current_item()  # 进入 EXECUTE：清单次缓存
+        label = cfg.actions[action_index].label
+        self._push_event(phase="EXECUTE_START", action=label, action_index=action_index)
         exec_clock = core.Clock()         # 执行期计时：到 execute_duration 即结束
         tick = core.Clock()               # 推理计时：每 predict_interval 推理一次
         while exec_clock.getTime() < cfg.execute_duration:
@@ -88,10 +94,21 @@ class TrialFSM:
                 tick.reset()
                 item = self.buffer.record_predict()
                 probs = self.decoder.predict(item)
+                # 推理前取 LSL 时间戳：PREDICT marker 对齐到“解码窗口截止/决策开始”，
+                # 不含模型推理耗时（耗时随模型变化，否则会污染时间戳）
+                t_pred = local_clock()
+                probs = self.decoder.predict(self.buffer.current_item)
                 pred = int(np.argmax(probs))
                 logger.info("predict | x={} p={:.3f} probs={}",
                             tuple(item.shape), float(probs[action_index]),
                             [round(float(p), 4) for p in probs])
+                logger.info("predict | x={} -> {}({}) p={:.3f}",
+                            tuple(self.buffer.current_item.shape), pred,
+                            cfg.actions[pred].label, float(probs[pred]))
+                self._push_event(timestamp=t_pred, phase="PREDICT",
+                                 action=label, action_index=action_index,
+                                 pred=pred, pred_label=cfg.actions[pred].label,
+                                 confidence=float(probs[pred]))
                 ui.record_result(pred, action_index, probs)
             ui.draw_cue(action_index)  # 动作名 + 右侧实时正确率
             ui.flip()
@@ -101,6 +118,7 @@ class TrialFSM:
 
     # --- FINISH：存档（trial 收尾）---------------------------------------
     def _finish(self, action_index: int) -> None:
+        self._push_event(phase="TRIAL_END", action=self.config.actions[action_index].label, action_index=action_index)
         self.buffer.save_sample(action_index)  # 窗口+label 入 block 存档
 
 
@@ -108,7 +126,7 @@ class BlockFSM:
     """block 级状态机：TRIAL → TRAIN_REST → FINISH，驱动整场实验（不含引导/总结页）。"""
 
     def __init__(self, config, source, decoder, buffer, ui, rng,
-                 session_dir: Path | None = None) -> None:
+                 session_dir: Path | None = None,push_event=None) -> None:
         self.config = config
         self.source = source
         self.decoder = decoder
@@ -117,6 +135,9 @@ class BlockFSM:
         self.rng = rng
         self.session_dir = session_dir
         self.trial = TrialFSM(config, source, decoder, buffer, ui)
+        self._push_event = push_event or (lambda **kw: None)
+        self.trial = TrialFSM(config, source, decoder, buffer, ui,
+                              push_event=self._push_event)
 
     def run(self) -> None:
         cfg = self.config
@@ -139,6 +160,8 @@ class BlockFSM:
                     if trial_idx < cfg.trials_per_block and cfg.iti_duration > 0:
                         _run_for(self.ui, cfg.iti_duration, lambda: None)
                 else:
+                    # 本 block 全部 trial 结束：与 BLOCK_START 对称地发 BLOCK_END
+                    self._push_event(phase="BLOCK_END")
                     state = BlockState.TRAIN_REST
             elif state == BlockState.TRAIN_REST:
                 if block < cfg.n_blocks - 1:
@@ -166,6 +189,7 @@ class BlockFSM:
     # --- block 起始动作 ---------------------------------------------------
     def _begin_block(self) -> None:
         self.buffer.clean()  # 每个 block 起始清空所有数据（仅用本 block 样本训练）
+        self._push_event(phase="BLOCK_START")
 
     def _block_order(self) -> list[int]:
         cfg = self.config

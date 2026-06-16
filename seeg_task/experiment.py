@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import numpy as np
 from psychopy import core
@@ -46,6 +47,7 @@ class Experiment:
         cfg = self.config
         self.ui = ExperimentUI(cfg)
         ui = self.ui
+        marker_outlet = self._create_marker_outlet()
         try:
             ui.draw_message(
                 "SEEG 脑机接口任务\n\n"
@@ -59,7 +61,9 @@ class Experiment:
                 raise QuitExperiment
 
             BlockFSM(cfg, self.source, self.decoder, self.buffer, ui, self.rng,
-                     session_dir=self.session_dir).run()
+                     session_dir=self.session_dir,
+                     push_event=_make_event_pusher(marker_outlet)
+                 ).run()
 
             ui.draw_message("实验结束，按任意键退出。")
             ui.flip()
@@ -71,3 +75,46 @@ class Experiment:
         finally:
             ui.close()
             self.source.close()
+
+    def _create_marker_outlet(self):
+        try:
+            from pylsl import StreamInfo, StreamOutlet
+            info = StreamInfo(
+                "ParadigmEvents", "Markers", 1, 0, "string",
+                source_id="seeg-interaction-task",
+            )
+            outlet = StreamOutlet(info)
+            print("[events] LSL marker 流已创建 (ParadigmEvents / Markers)")
+            return outlet
+        except Exception as exc:
+            print(f"[events] 创建 LSL marker 流出错，事件将不推送: {exc}")
+            return None
+
+    def _show_summary(self) -> None:
+        ui = self.ui
+        pct = 100.0 * ui.total_correct / ui.total_trials if ui.total_trials else 0.0
+        ui.draw_message(
+            "实验结束\n\n"
+            f"总体解码正确率：{pct:.1f}%  ({ui.total_correct}/{ui.total_trials})\n\n"
+            "按任意键退出。"
+        )
+        ui.flip()
+        ui.wait_keys()
+
+
+def _make_event_pusher(outlet):
+    """如果 outlet 存在，返回 ``push_event(**fields)`` 闭包；否则返回 no-op。"""
+    if outlet is None:
+        return None
+    def push_event(timestamp=None, **fields):
+        # timestamp 不为 None 时作为 LSL 样本时间戳显式传入（如 PREDICT 用推理前的时刻），
+        # 它不进 JSON payload——读取端从 LSL 样本时间还原（见 xdf_viewer）。
+        try:
+            payload = [json.dumps(fields, ensure_ascii=False, separators=(",", ":"))]
+            if timestamp is None:
+                outlet.push_sample(payload)
+            else:
+                outlet.push_sample(payload, timestamp)
+        except Exception:
+            pass
+    return push_event
