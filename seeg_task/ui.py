@@ -108,7 +108,7 @@ class ExperimentUI:
     # --- 绘制（不 flip）-----------------------------------------------------
     def draw_right_panel(self) -> None:
         """右面板：显示最新一次 predict 的置信度 p = probs[predicted]。"""
-        self.acc_value.text = f"{self._last_p:.3f}" if self._last_p is not None else "---"
+        self.acc_value.text = f"{self._last_p * 100:.0f}%" if self._last_p is not None else "---%"
         self.acc_title.draw()
         self.acc_value.draw()
 
