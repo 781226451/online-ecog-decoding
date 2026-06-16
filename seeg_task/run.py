@@ -177,7 +177,16 @@ def main() -> int:
     if args.log_file is not None:
         cfg.log_file = args.log_file
 
-    session_dir = Path("data") / datetime.now().strftime("%Y%m%d_%H%M%S")
+    from psychopy import gui
+    dlg = gui.Dlg(title="被试信息")
+    dlg.addField("被试编号:", "")
+    data = dlg.show()
+    if not dlg.OK or not data[0].strip():
+        print("未输入被试编号，已取消。")
+        return 1
+    subject_name = data[0].strip()
+
+    session_dir = Path("data") / subject_name / datetime.now().strftime("%Y%m%d_%H%M%S")
     session_dir.mkdir(parents=True, exist_ok=True)
     log_file = cfg.log_file if cfg.log_file is not None else str(session_dir / "run.log")
     _configure_logging(cfg.log_level, log_file)
