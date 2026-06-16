@@ -58,7 +58,9 @@ class ExperimentUI:
         self._right_x = aspect / 4.0         # 右面板中心 x
 
         self.current_action: int | None = None
-        self._last_p: float | None = None
+        self._trial_correct: int = 0
+        self._trial_total: int = 0
+        self._cue_prob: float | None = None
 
         self._build_static_stims()
 
@@ -83,11 +85,12 @@ class ExperimentUI:
             text="", height=0.09, pos=(self._left_x, 0.0), bold=True,
         )
 
-        # 右面板：最新解码置信度 p = probs[predicted]
+        # 右面板：实时解码结果
         self.acc_title = self._text(
-            text="解码置信度", height=0.06, pos=(self._right_x, 0.12), bold=True,
+            text="正确率", height=0.06, pos=(self._right_x, 0.12), bold=True,
         )
-        self.acc_value = self._text(text="---", height=0.28, pos=(self._right_x, -0.08), bold=True)
+        self.acc_value = self._text(text="--", height=0.18, pos=(self._right_x, -0.02), bold=True)
+        self.pred_prob = self._text(text="", height=0.05, pos=(self._right_x, -0.22))
 
         # 全屏 CUE 文字 与 全屏盯点白色十字（trial 级 FSM 使用）
         self.cue_text = self._text(text="", height=0.09, pos=(0, 0), bold=True,
@@ -100,17 +103,27 @@ class ExperimentUI:
         self.rest_prompt = self._text(text="", height=0.05, pos=(0, -0.12))
 
     # --- 统计更新 -----------------------------------------------------------
+    def reset_trial_stats(self) -> None:
+        """每个 trial 的 EXECUTE 开始时调用，确保显示本 trial 的正确率。"""
+        self._trial_correct = 0
+        self._trial_total = 0
+        self._cue_prob = None
+
     def record_result(self, predicted: int, true_label: int, probs: np.ndarray | None = None) -> bool:
-        if probs is not None:
-            self._last_p = float(probs[predicted])
-        return int(predicted) == int(true_label)
+        correct = int(predicted) == int(true_label)
+        self._trial_total += 1
+        if correct:
+            self._trial_correct += 1
+        self._cue_prob = float(probs[true_label]) if probs is not None else None
+        return correct
 
     # --- 绘制（不 flip）-----------------------------------------------------
     def draw_right_panel(self) -> None:
-        """右面板：显示最新一次 predict 的置信度 p = probs[predicted]。"""
-        self.acc_value.text = f"{self._last_p * 100:.0f}%" if self._last_p is not None else "---%"
+        """右面板：显示给定动作的实时概率值。"""
+        self.acc_value.text = f"{self._cue_prob * 100:.1f}%" if self._cue_prob is not None else "--"
         self.acc_title.draw()
         self.acc_value.draw()
+        self.pred_prob.draw()
 
     def draw_divider(self) -> None:
         self.divider.draw()

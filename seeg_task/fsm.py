@@ -76,6 +76,7 @@ class TrialFSM:
         cfg, ui = self.config, self.ui
         self.source.flush()               # 丢弃 CUE/FIXATION 期积压，只采执行期数据
         self.buffer.reset_window()  # 进入 EXECUTE：清单次缓存
+        ui.reset_trial_stats()       # 重置本 trial 正确率统计
         exec_clock = core.Clock()         # 执行期计时：到 execute_duration 即结束
         tick = core.Clock()               # 推理计时：每 predict_interval 推理一次
         while exec_clock.getTime() < cfg.execute_duration:
